@@ -1,0 +1,1232 @@
+// ============================================
+// ========= QUARTERLY & YEARLY CONSTANTS =====
+// ============================================
+
+var QUARTERS = {
+  "Q1": ["Jan", "Feb", "Mar"],
+  "Q2": ["Apr", "May", "Jun"],
+  "Q3": ["Jul", "Aug", "Sep"],
+  "Q4": ["Oct", "Nov", "Dec"]
+};
+
+
+// ============================================
+// ========= QUARTERLY DASHBOARD ==============
+// ============================================
+
+function buildQuarterlyDashboard() {
+  try {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var dash = ss.getSheetByName("Quarterly");
+    if (!dash) dash = ss.insertSheet("Quarterly");
+    dash.clear();
+
+    var nc = 10;
+
+    dash.getRange(1, 1, 1, nc).merge()
+      .setValue("📆 QUARTERLY SOCIAL MEDIA DASHBOARD")
+      .setFontSize(18).setFontWeight("bold")
+      .setBackground(PRIMARY_BLUE).setFontColor("white")
+      .setHorizontalAlignment("center");
+
+    dash.getRange(2, 1, 1, nc).merge()
+      .setValue("Select filters → Menu: 📊 Social Media → 📆 Quarterly & Yearly → 🔄 Refresh")
+      .setFontSize(10).setFontColor("#666").setHorizontalAlignment("center")
+      .setBackground(STATUS_COLORS.info.bg);
+
+    dash.getRange(4, 1).setValue("🏢 Platform:").setFontWeight("bold").setFontSize(FONT_SIZES.table);
+    dash.getRange(4, 2).setValue("All").setDataValidation(
+      SpreadsheetApp.newDataValidation()
+        .requireValueInList(["All"].concat(PLATFORMS))
+        .setAllowInvalid(false).build()
+    ).setBackground("#FFF9C4").setFontWeight("bold");
+
+    dash.getRange(4, 3).setValue("📅 Quarter:").setFontWeight("bold").setFontSize(FONT_SIZES.table);
+    dash.getRange(4, 4).setValue("All").setDataValidation(
+      SpreadsheetApp.newDataValidation()
+        .requireValueInList(["All", "Q1 (Jan-Mar)", "Q2 (Apr-Jun)", "Q3 (Jul-Sep)", "Q4 (Oct-Dec)"])
+        .setAllowInvalid(false).build()
+    ).setBackground("#FFF9C4").setFontWeight("bold");
+
+    dash.getRange(4, 5).setValue("📆 Year:").setFontWeight("bold").setFontSize(FONT_SIZES.table);
+    dash.getRange(4, 6).setValue(new Date().getFullYear().toString()).setDataValidation(
+      SpreadsheetApp.newDataValidation()
+        .requireValueInList(getYearList())
+        .setAllowInvalid(false).build()
+    ).setBackground("#FFF9C4").setFontWeight("bold");
+
+    for (var c = 1; c <= nc; c++) dash.setColumnWidth(c, 130);
+    dash.setFrozenRows(4);
+
+    SpreadsheetApp.getUi().alert("✅ Quarterly Dashboard created!\nSelect filters and use 🔄 Refresh.");
+  } catch (e) {
+    SpreadsheetApp.getUi().alert("❌ Error: " + e.message);
+  }
+}
+
+function refreshQuarterlyDashboard() {
+  try {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var raw = ss.getSheetByName("Raw Data");
+    var dash = ss.getSheetByName("Quarterly");
+
+    if (!raw || !dash) { SpreadsheetApp.getUi().alert("❌ Missing sheets!"); return; }
+
+    var selectedPlatform = dash.getRange(4, 2).getValue().toString().trim();
+    var selectedQuarter = dash.getRange(4, 4).getValue().toString().trim();
+    var selectedYear = dash.getRange(4, 6).getValue().toString().trim();
+
+    var rawData = raw.getDataRange().getValues();
+    var monthHeaders = getAllMonthHeaders(rawData);
+    var parsed = parseRawData(rawData);
+
+    // Check if current year
+    var currentYear = new Date().getFullYear();
+    var isCurrentYear = (parseInt(selectedYear) === currentYear);
+    var currentMonth = new Date().getMonth(); // 0-indexed
+
+    // Parse selected quarter
+    var selectedQMonths = null;
+    var selectedQKey = null;
+    if (selectedQuarter !== "All") {
+      selectedQKey = selectedQuarter.substring(0, 2);
+      selectedQMonths = QUARTERS[selectedQKey];
+    }
+
+    // Filter months
+    var filteredMonths = monthHeaders.filter(function(mh) {
+      var yearMatch = (selectedYear === "All" || mh.year === parseInt(selectedYear));
+      var quarterMatch = true;
+      if (selectedQMonths) {
+        quarterMatch = selectedQMonths.indexOf(mh.month) > -1;
+      }
+      return yearMatch && quarterMatch;
+    });
+
+    if (filteredMonths.length === 0) {
+      clearQuarterlyContent(dash);
+      dash.getRange(6, 1, 1, 10).merge()
+        .setValue("❌ No data for selected filters")
+        .setFontSize(14).setHorizontalAlignment("center").setFontColor("red");
+      return;
+    }
+
+    var platforms = (selectedPlatform === "All")
+      ? Object.keys(parsed.allData)
+      : (parsed.allData[selectedPlatform] ? [selectedPlatform] : []);
+
+    clearQuarterlyContent(dash);
+
+    var nc = 10;
+    var row = 6;
+    var rightCol = 12; // Summary panel starts here
+    var rightSpan = 5;
+
+    // Ensure right columns exist
+    var totalCols = dash.getMaxColumns();
+    if (totalCols < rightCol + rightSpan) {
+      dash.insertColumnsAfter(totalCols, (rightCol + rightSpan) - totalCols);
+    }
+    dash.setColumnWidth(11, 20); // Gap column
+    for (var c = rightCol; c <= rightCol + rightSpan - 1; c++) {
+      dash.setColumnWidth(c, 100);
+    }
+
+    // ===== RIGHT PANEL: SUMMARY =====
+    renderQuarterlySummaryPanel(dash, rawData, parsed, platforms, filteredMonths, monthHeaders,
+      selectedPlatform, selectedQuarter, selectedYear, isCurrentYear, currentMonth, rightCol, rightSpan);
+
+    // ===== CURRENT YEAR NOTIFICATION =====
+    if (isCurrentYear) {
+      dash.getRange(row, 1, 1, nc).merge()
+        .setValue("⚠️ NOTE: " + selectedYear + " is the current year — data may be incomplete for future months")
+        .setFontSize(9).setFontWeight("bold").setFontColor("#E65100")
+        .setBackground("#FFF3E0").setHorizontalAlignment("center");
+      row++;
+
+      // Show which months have data
+      var monthsWithData = filteredMonths.map(function(m) { return m.month; }).join(", ");
+      dash.getRange(row, 1, 1, nc).merge()
+        .setValue("📅 Data available for: " + monthsWithData + " (" + filteredMonths.length + " months)")
+        .setFontSize(8).setFontColor("#666").setBackground("#FFF9C4").setHorizontalAlignment("center");
+      row++;
+    }
+
+    // ===== QUARTERLY KPI SUMMARY =====
+    var filterLabel = selectedPlatform + " | " + selectedQuarter + " | " + selectedYear;
+
+    dash.getRange(row, 1, 1, nc).merge()
+      .setValue("📆 QUARTERLY SUMMARY — " + filterLabel)
+      .setFontSize(13).setFontWeight("bold")
+      .setBackground(PRIMARY_BLUE).setFontColor("white").setHorizontalAlignment("center");
+    row++;
+
+    // Calculate quarterly totals
+    var qTraffic = 0, qFollowers = 0, qPosts = 0, qImpressions = 0;
+
+    if (parsed.postCountRow > -1) {
+      for (var m = 0; m < filteredMonths.length; m++) {
+        qPosts += cleanNum(rawData[parsed.postCountRow][filteredMonths[m].col]);
+      }
+    }
+
+    if (parsed.totalTrafficRow > -1 && selectedPlatform === "All") {
+      for (var m = 0; m < filteredMonths.length; m++) {
+        qTraffic += cleanNum(rawData[parsed.totalTrafficRow][filteredMonths[m].col]);
+      }
+    }
+
+    for (var p = 0; p < platforms.length; p++) {
+      var pMetrics = parsed.allData[platforms[p]];
+      for (var metric in pMetrics) {
+        var mRow = pMetrics[metric];
+        var ml = metric.toLowerCase();
+        for (var m = 0; m < filteredMonths.length; m++) {
+          var val = cleanNum(rawData[mRow][filteredMonths[m].col]);
+          if (ml.indexOf("traffic") > -1 && selectedPlatform !== "All") qTraffic += val;
+          if ((ml.indexOf("followers") > -1 || ml.indexOf("subscribers") > -1) && m === filteredMonths.length - 1) qFollowers += val;
+          if (ml.indexOf("impression") > -1) qImpressions += val;
+        }
+      }
+    }
+
+    // KPI Labels
+    var kpiLabels = ["🌐 Traffic", "👥 Followers", "📝 Posts", "👁️ Impressions", "📅 Months"];
+    for (var k = 0; k < kpiLabels.length; k++) {
+      dash.getRange(row, 1 + (k * 2), 1, 2).merge()
+        .setValue(kpiLabels[k]).setFontWeight("bold").setFontSize(9)
+        .setBackground("#f1f3f4").setHorizontalAlignment("center");
+    }
+    row++;
+
+    var kpiValues = [
+      { value: qTraffic, bg: STATUS_COLORS.positive.bg, color: STATUS_COLORS.positive.font },
+      { value: qFollowers, bg: STATUS_COLORS.info.bg, color: STATUS_COLORS.info.font },
+      { value: qPosts, bg: STATUS_COLORS.neutral.bg, color: STATUS_COLORS.neutral.font },
+      { value: qImpressions, bg: "#F3E5F5", color: "#7B1FA2" },
+      { value: filteredMonths.length, bg: "#E0F2F1", color: "#00695C" }
+    ];
+
+    for (var k = 0; k < kpiValues.length; k++) {
+      dash.getRange(row, 1 + (k * 2), 1, 2).merge()
+        .setValue(kpiValues[k].value).setNumberFormat("#,##0")
+        .setFontSize(18).setFontWeight("bold").setHorizontalAlignment("center")
+        .setBackground(kpiValues[k].bg).setFontColor(kpiValues[k].color);
+    }
+    row += 2;
+
+    // ===== QUARTER-BY-QUARTER BREAKDOWN =====
+    var targetYear = parseInt(selectedYear);
+    if (!isNaN(targetYear)) {
+      dash.getRange(row, 1, 1, nc).merge()
+        .setValue("📆 " + targetYear + " — QUARTERLY TRAFFIC BREAKDOWN")
+        .setFontSize(FONT_SIZES.normal).setFontWeight("bold")
+        .setBackground("#34a853").setFontColor("white").setHorizontalAlignment("center");
+      row++;
+
+      // Headers
+      dash.getRange(row, 1, 1, 2).merge().setValue("Platform")
+        .setFontWeight("bold").setBackground(HEADER_BG).setFontColor("white")
+        .setHorizontalAlignment("center").setFontSize(FONT_SIZES.table);
+
+      var qKeys = ["Q1", "Q2", "Q3", "Q4"];
+      for (var q = 0; q < qKeys.length; q++) {
+        dash.getRange(row, 3 + (q * 2), 1, 2).merge()
+          .setValue(qKeys[q] + " (" + QUARTERS[qKeys[q]].join(",") + ")")
+          .setFontWeight("bold").setBackground(HEADER_BG).setFontColor("white")
+          .setHorizontalAlignment("center").setFontSize(8);
+      }
+      row++;
+
+      for (var p = 0; p < platforms.length; p++) {
+        var pName = platforms[p];
+        var pMetrics = parsed.allData[pName];
+        var bg = (PLATFORM_COLORS[pName] || { light: "#FFF" }).light;
+
+        dash.getRange(row, 1, 1, 2).merge().setValue(pName)
+          .setFontWeight("bold").setBackground(bg).setFontSize(FONT_SIZES.table);
+
+        for (var q = 0; q < qKeys.length; q++) {
+          var qMonths = QUARTERS[qKeys[q]];
+          var qTotal = 0;
+
+          for (var metric in pMetrics) {
+            if (metric.toLowerCase().indexOf("traffic") > -1) {
+              for (var m = 0; m < monthHeaders.length; m++) {
+                if (monthHeaders[m].year === targetYear && qMonths.indexOf(monthHeaders[m].month) > -1) {
+                  qTotal += cleanNum(rawData[pMetrics[metric]][monthHeaders[m].col]);
+                }
+              }
+              break;
+            }
+          }
+
+          // Check if this quarter has data yet (for current year)
+          var hasData = false;
+          for (var m = 0; m < monthHeaders.length; m++) {
+            if (monthHeaders[m].year === targetYear && qMonths.indexOf(monthHeaders[m].month) > -1) {
+              hasData = true;
+              break;
+            }
+          }
+
+          var cellBg = bg;
+          if (!hasData && isCurrentYear) cellBg = "#EEEEEE";
+
+          dash.getRange(row, 3 + (q * 2), 1, 2).merge()
+            .setValue(hasData ? (qTotal > 0 ? qTotal : 0) : "—")
+            .setNumberFormat("#,##0").setHorizontalAlignment("center")
+            .setBackground(cellBg).setFontSize(FONT_SIZES.table)
+            .setFontColor(hasData ? "#333" : "#999");
+        }
+        row++;
+      }
+
+      // Total row
+      dash.getRange(row, 1, 1, 2).merge().setValue("TOTAL")
+        .setFontWeight("bold").setBackground("#E8F5E9").setFontSize(FONT_SIZES.table);
+
+      for (var q = 0; q < qKeys.length; q++) {
+        var qMonths = QUARTERS[qKeys[q]];
+        var grandTotal = 0;
+        var hasQData = false;
+
+        if (parsed.totalTrafficRow > -1) {
+          for (var m = 0; m < monthHeaders.length; m++) {
+            if (monthHeaders[m].year === targetYear && qMonths.indexOf(monthHeaders[m].month) > -1) {
+              grandTotal += cleanNum(rawData[parsed.totalTrafficRow][monthHeaders[m].col]);
+              hasQData = true;
+            }
+          }
+        } else {
+          for (var p = 0; p < platforms.length; p++) {
+            var pMetrics = parsed.allData[platforms[p]];
+            for (var metric in pMetrics) {
+              if (metric.toLowerCase().indexOf("traffic") > -1) {
+                for (var m = 0; m < monthHeaders.length; m++) {
+                  if (monthHeaders[m].year === targetYear && qMonths.indexOf(monthHeaders[m].month) > -1) {
+                    grandTotal += cleanNum(rawData[pMetrics[metric]][monthHeaders[m].col]);
+                    hasQData = true;
+                  }
+                }
+                break;
+              }
+            }
+          }
+        }
+
+        dash.getRange(row, 3 + (q * 2), 1, 2).merge()
+          .setValue(hasQData ? grandTotal : "—")
+          .setNumberFormat("#,##0").setFontWeight("bold").setHorizontalAlignment("center")
+          .setBackground("#E8F5E9").setFontSize(FONT_SIZES.table)
+          .setFontColor(hasQData ? "#333" : "#999");
+      }
+      row += 2;
+    }
+
+    // ===== DETAILED METRICS PER QUARTER =====
+    if (selectedQMonths) {
+      var qLabel = selectedQuarter + " " + selectedYear;
+
+      dash.getRange(row, 1, 1, nc).merge()
+        .setValue("📋 DETAILED METRICS — " + qLabel)
+        .setFontSize(FONT_SIZES.normal).setFontWeight("bold")
+        .setBackground(PRIMARY_BLUE).setFontColor("white").setHorizontalAlignment("center");
+      row++;
+
+      for (var p = 0; p < platforms.length; p++) {
+        var pName = platforms[p];
+        var pMetrics = parsed.allData[pName];
+        var pColor = (PLATFORM_COLORS[pName] || { dark: "#333" }).dark;
+        var pBg = (PLATFORM_COLORS[pName] || { light: "#FFF" }).light;
+
+        dash.getRange(row, 1, 1, nc).merge().setValue(pName)
+          .setFontWeight("bold").setFontSize(FONT_SIZES.table)
+          .setBackground(pColor).setFontColor("white").setHorizontalAlignment("center");
+        row++;
+
+        // Headers
+        dash.getRange(row, 1, 1, 2).merge().setValue("Metric")
+          .setFontWeight("bold").setBackground("#f1f3f4").setFontSize(FONT_SIZES.table).setHorizontalAlignment("center");
+
+        var colIdx = 3;
+        for (var m = 0; m < filteredMonths.length && colIdx + 1 <= nc; m++) {
+          dash.getRange(row, colIdx, 1, 2).merge().setValue(filteredMonths[m].label)
+            .setFontWeight("bold").setBackground("#f1f3f4").setFontSize(8).setHorizontalAlignment("center");
+          colIdx += 2;
+        }
+
+        if (colIdx + 1 <= nc) {
+          dash.getRange(row, colIdx, 1, nc - colIdx + 1).merge().setValue("Q Total")
+            .setFontWeight("bold").setBackground(HEADER_BG).setFontColor("white")
+            .setFontSize(8).setHorizontalAlignment("center");
+        }
+        row++;
+
+        for (var metric in pMetrics) {
+          var mRow = pMetrics[metric];
+
+          dash.getRange(row, 1, 1, 2).merge().setValue(metric)
+            .setFontWeight("bold").setBackground(pBg).setFontSize(FONT_SIZES.table);
+
+          var qMetricTotal = 0;
+          colIdx = 3;
+          for (var m = 0; m < filteredMonths.length && colIdx + 1 <= nc; m++) {
+            var val = cleanNum(rawData[mRow][filteredMonths[m].col]);
+            qMetricTotal += val;
+            dash.getRange(row, colIdx, 1, 2).merge().setValue(val)
+              .setNumberFormat("#,##0").setHorizontalAlignment("center")
+              .setBackground(pBg).setFontSize(FONT_SIZES.table);
+            colIdx += 2;
+          }
+
+          if (colIdx + 1 <= nc) {
+            dash.getRange(row, colIdx, 1, nc - colIdx + 1).merge().setValue(qMetricTotal)
+              .setNumberFormat("#,##0").setFontWeight("bold").setHorizontalAlignment("center")
+              .setBackground("#E8F5E9").setFontSize(FONT_SIZES.table);
+          }
+          row++;
+        }
+
+        dash.getRange(row, 1, 1, nc).merge().setBackground("#FFFFFF");
+        row++;
+      }
+    }
+
+    // ===== FOOTER =====
+    row++;
+    dash.getRange(row, 1, 1, nc).merge()
+      .setValue("📆 Quarterly Dashboard  |  Generated: " + new Date().toLocaleString())
+      .setFontSize(8).setFontColor("#999999").setHorizontalAlignment("center");
+
+    SpreadsheetApp.getUi().alert("✅ Quarterly Dashboard refreshed!");
+  } catch (e) {
+    SpreadsheetApp.getUi().alert("❌ Error: " + e.message);
+  }
+}
+
+function renderQuarterlySummaryPanel(dash, rawData, parsed, platforms, filteredMonths, monthHeaders,
+  selectedPlatform, selectedQuarter, selectedYear, isCurrentYear, currentMonth, startCol, span) {
+
+  var sc = startCol;
+  var row = 1;
+
+  // Title
+  dash.getRange(row, sc, 1, span).merge()
+    .setValue("📋 QUICK SUMMARY")
+    .setFontSize(13).setFontWeight("bold")
+    .setBackground(PRIMARY_BLUE).setFontColor("white").setHorizontalAlignment("center");
+  row++;
+
+  dash.getRange(row, sc, 1, span).merge()
+    .setValue(selectedQuarter + " | " + selectedYear + " | " + selectedPlatform)
+    .setFontSize(9).setFontColor("#666").setBackground(STATUS_COLORS.info.bg).setHorizontalAlignment("center");
+  row++;
+
+  // Current year warning
+  if (isCurrentYear) {
+    row++;
+    dash.getRange(row, sc, 1, span).merge()
+      .setValue("⚠️ CURRENT YEAR")
+      .setFontSize(10).setFontWeight("bold").setFontColor("#E65100")
+      .setBackground("#FFF3E0").setHorizontalAlignment("center");
+    row++;
+
+    var monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+    var currentMonthName = monthNames[currentMonth];
+    var dataMonths = filteredMonths.length;
+
+    dash.getRange(row, sc, 1, span).merge()
+      .setValue("We are in " + currentMonthName + " " + selectedYear)
+      .setFontSize(9).setFontColor("#333").setBackground("#FFF9C4").setHorizontalAlignment("center");
+    row++;
+
+    dash.getRange(row, sc, 1, span).merge()
+      .setValue("Data available: " + dataMonths + " month" + (dataMonths > 1 ? "s" : ""))
+      .setFontSize(9).setFontColor("#333").setBackground("#FFF9C4").setHorizontalAlignment("center");
+    row++;
+
+    // Check if selected quarter is complete
+    if (selectedQuarter !== "All") {
+      var qKey = selectedQuarter.substring(0, 2);
+      var qMonths = QUARTERS[qKey];
+      var qDataMonths = filteredMonths.filter(function(fm) {
+        return qMonths.indexOf(fm.month) > -1;
+      }).length;
+
+      var isComplete = qDataMonths === 3;
+
+      dash.getRange(row, sc, 1, span).merge()
+        .setValue(isComplete ? "✅ Quarter complete (3/3 months)" : "⏳ Quarter incomplete (" + qDataMonths + "/3 months)")
+        .setFontSize(9).setFontWeight("bold")
+        .setFontColor(isComplete ? STATUS_COLORS.positive.font : "#E65100")
+        .setBackground(isComplete ? STATUS_COLORS.positive.bg : "#FFF3E0")
+        .setHorizontalAlignment("center");
+      row++;
+    }
+  }
+
+  row++;
+
+  // Traffic breakdown summary
+  dash.getRange(row, sc, 1, span).merge()
+    .setValue("📊 TRAFFIC SPLIT")
+    .setFontSize(10).setFontWeight("bold")
+    .setBackground("#34a853").setFontColor("white").setHorizontalAlignment("center");
+  row++;
+
+  var trafficByPlatform = [];
+  var totalTraffic = 0;
+
+  for (var p = 0; p < platforms.length; p++) {
+    var pName = platforms[p];
+    var pMetrics = parsed.allData[pName];
+    var pTraffic = 0;
+
+    for (var metric in pMetrics) {
+      if (metric.toLowerCase().indexOf("traffic") > -1) {
+        for (var m = 0; m < filteredMonths.length; m++) {
+          pTraffic += cleanNum(rawData[pMetrics[metric]][filteredMonths[m].col]);
+        }
+        break;
+      }
+    }
+
+    trafficByPlatform.push({ name: pName, traffic: pTraffic });
+    totalTraffic += pTraffic;
+  }
+
+  trafficByPlatform.sort(function(a, b) { return b.traffic - a.traffic; });
+
+  for (var i = 0; i < trafficByPlatform.length; i++) {
+    var td = trafficByPlatform[i];
+    var share = totalTraffic > 0 ? ((td.traffic / totalTraffic) * 100).toFixed(0) : "0";
+    var bg = (PLATFORM_COLORS[td.name] || { light: "#FFF" }).light;
+
+    dash.getRange(row, sc, 1, 2).merge().setValue(td.name)
+      .setFontWeight("bold").setBackground(bg).setFontSize(8);
+    dash.getRange(row, sc + 2, 1, 1).setValue(td.traffic)
+      .setNumberFormat("#,##0").setHorizontalAlignment("center").setBackground(bg).setFontSize(8);
+    dash.getRange(row, sc + 3, 1, span - 3).merge().setValue(share + "%")
+      .setHorizontalAlignment("center").setBackground(bg).setFontSize(8);
+    row++;
+  }
+
+  dash.getRange(row, sc, 1, 2).merge().setValue("TOTAL")
+    .setFontWeight("bold").setBackground("#E8F5E9").setFontSize(8);
+  dash.getRange(row, sc + 2, 1, 1).setValue(totalTraffic)
+    .setNumberFormat("#,##0").setFontWeight("bold").setHorizontalAlignment("center").setBackground("#E8F5E9").setFontSize(8);
+  dash.getRange(row, sc + 3, 1, span - 3).merge().setValue("100%")
+    .setFontWeight("bold").setHorizontalAlignment("center").setBackground("#E8F5E9").setFontSize(8);
+  row += 2;
+
+  // Top performer
+  if (trafficByPlatform.length > 0 && trafficByPlatform[0].traffic > 0) {
+    dash.getRange(row, sc, 1, span).merge()
+      .setValue("🏆 TOP PERFORMER")
+      .setFontSize(10).setFontWeight("bold")
+      .setBackground("#FF6D00").setFontColor("white").setHorizontalAlignment("center");
+    row++;
+
+    var top = trafficByPlatform[0];
+    var topShare = totalTraffic > 0 ? ((top.traffic / totalTraffic) * 100).toFixed(1) : "0";
+
+    dash.getRange(row, sc, 1, span).merge()
+      .setValue(top.name)
+      .setFontSize(14).setFontWeight("bold")
+      .setFontColor((PLATFORM_COLORS[top.name] || { dark: "#333" }).dark)
+      .setBackground((PLATFORM_COLORS[top.name] || { light: "#FFF" }).light)
+      .setHorizontalAlignment("center");
+    row++;
+
+    dash.getRange(row, sc, 1, span).merge()
+      .setValue(formatNumber(top.traffic) + " visits (" + topShare + "% of total)")
+      .setFontSize(9).setHorizontalAlignment("center").setBackground("#f1f3f4");
+    row += 2;
+  }
+
+  // Quarter comparison (if viewing specific quarter)
+  if (selectedQuarter !== "All" && !isNaN(parseInt(selectedYear))) {
+    var qKey = selectedQuarter.substring(0, 2);
+    var prevYear = parseInt(selectedYear) - 1;
+
+    // Get same quarter last year
+    var prevQTraffic = 0;
+    var qMonths = QUARTERS[qKey];
+
+    if (parsed.totalTrafficRow > -1 && selectedPlatform === "All") {
+      for (var m = 0; m < monthHeaders.length; m++) {
+        if (monthHeaders[m].year === prevYear && qMonths.indexOf(monthHeaders[m].month) > -1) {
+          prevQTraffic += cleanNum(rawData[parsed.totalTrafficRow][monthHeaders[m].col]);
+        }
+      }
+    } else {
+      for (var p = 0; p < platforms.length; p++) {
+        var pMetrics = parsed.allData[platforms[p]];
+        for (var metric in pMetrics) {
+          if (metric.toLowerCase().indexOf("traffic") > -1) {
+            for (var m = 0; m < monthHeaders.length; m++) {
+              if (monthHeaders[m].year === prevYear && qMonths.indexOf(monthHeaders[m].month) > -1) {
+                prevQTraffic += cleanNum(rawData[pMetrics[metric]][monthHeaders[m].col]);
+              }
+            }
+            break;
+          }
+        }
+      }
+    }
+
+    if (prevQTraffic > 0) {
+      dash.getRange(row, sc, 1, span).merge()
+        .setValue("📊 vs " + qKey + " " + prevYear)
+        .setFontSize(10).setFontWeight("bold")
+        .setBackground(PRIMARY_BLUE).setFontColor("white").setHorizontalAlignment("center");
+      row++;
+
+      var qoyChange = (((totalTraffic - prevQTraffic) / prevQTraffic) * 100).toFixed(1);
+      var qoyColor = parseFloat(qoyChange) >= 0 ? STATUS_COLORS.positive.font : STATUS_COLORS.negative.font;
+      var qoyBg = parseFloat(qoyChange) >= 0 ? STATUS_COLORS.positive.bg : STATUS_COLORS.negative.bg;
+      var qoyPrefix = parseFloat(qoyChange) >= 0 ? "+" : "";
+
+      dash.getRange(row, sc, 1, span).merge()
+        .setValue(qoyPrefix + qoyChange + "%")
+        .setFontSize(20).setFontWeight("bold").setFontColor(qoyColor)
+        .setBackground(qoyBg).setHorizontalAlignment("center");
+      row++;
+
+      dash.getRange(row, sc, 1, span).merge()
+        .setValue(formatNumber(prevQTraffic) + " → " + formatNumber(totalTraffic))
+        .setFontSize(9).setHorizontalAlignment("center").setBackground("#f1f3f4");
+      row++;
+    }
+  }
+}
+
+function clearQuarterlyContent(dash) {
+  var lastRow = Math.max(dash.getLastRow(), 6);
+  var lastCol = Math.max(dash.getLastColumn(), 17);
+  if (lastRow > 5) {
+    dash.getRange(6, 1, lastRow - 4, 10).clear();
+  }
+  // Clear right panel (rows 1 onwards for summary)
+  try {
+    dash.getRange(1, 12, lastRow, 6).clear();
+  } catch (e) {}
+
+  var existingCharts = dash.getCharts();
+  for (var i = 0; i < existingCharts.length; i++) {
+    dash.removeChart(existingCharts[i]);
+  }
+}
+
+
+// ============================================
+// ========= YEARLY DASHBOARD ================
+// ============================================
+
+function buildYearlyDashboard() {
+  try {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var dash = ss.getSheetByName("Yearly");
+    if (!dash) dash = ss.insertSheet("Yearly");
+    dash.clear();
+
+    var nc = 10;
+
+    dash.getRange(1, 1, 1, nc).merge()
+      .setValue("📅 YEARLY COMPARISON DASHBOARD")
+      .setFontSize(18).setFontWeight("bold")
+      .setBackground("#FF6D00").setFontColor("white")
+      .setHorizontalAlignment("center");
+
+    dash.getRange(2, 1, 1, nc).merge()
+      .setValue("Select filters → Menu: 📊 Social Media → 📆 Quarterly & Yearly → 🔄 Refresh")
+      .setFontSize(10).setFontColor("#666").setHorizontalAlignment("center")
+      .setBackground(STATUS_COLORS.info.bg);
+
+    dash.getRange(4, 1).setValue("🏢 Platform:").setFontWeight("bold").setFontSize(FONT_SIZES.table);
+    dash.getRange(4, 2).setValue("All").setDataValidation(
+      SpreadsheetApp.newDataValidation()
+        .requireValueInList(["All"].concat(PLATFORMS))
+        .setAllowInvalid(false).build()
+    ).setBackground("#FFF9C4").setFontWeight("bold");
+
+    dash.getRange(4, 3).setValue("📆 From Year:").setFontWeight("bold").setFontSize(FONT_SIZES.table);
+    dash.getRange(4, 4).setValue("2023").setDataValidation(
+      SpreadsheetApp.newDataValidation()
+        .requireValueInList(getYearList().slice(1)) // Remove "All"
+        .setAllowInvalid(false).build()
+    ).setBackground("#FFF9C4").setFontWeight("bold");
+
+    dash.getRange(4, 5).setValue("📆 To Year:").setFontWeight("bold").setFontSize(FONT_SIZES.table);
+    dash.getRange(4, 6).setValue(new Date().getFullYear().toString()).setDataValidation(
+      SpreadsheetApp.newDataValidation()
+        .requireValueInList(getYearList().slice(1)) // Remove "All"
+        .setAllowInvalid(false).build()
+    ).setBackground("#FFF9C4").setFontWeight("bold");
+
+    for (var c = 1; c <= nc; c++) dash.setColumnWidth(c, 130);
+    dash.setFrozenRows(4);
+
+    SpreadsheetApp.getUi().alert("✅ Yearly Dashboard created!\nSelect years and use 🔄 Refresh.");
+  } catch (e) {
+    SpreadsheetApp.getUi().alert("❌ Error: " + e.message);
+  }
+}
+
+function refreshYearlyDashboard() {
+  try {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var raw = ss.getSheetByName("Raw Data");
+    var dash = ss.getSheetByName("Yearly");
+
+    if (!raw || !dash) { SpreadsheetApp.getUi().alert("❌ Missing sheets!"); return; }
+
+    var selectedPlatform = dash.getRange(4, 2).getValue().toString().trim();
+    var fromYear = parseInt(dash.getRange(4, 4).getValue().toString().trim());
+    var toYear = parseInt(dash.getRange(4, 6).getValue().toString().trim());
+
+    if (isNaN(fromYear) || isNaN(toYear)) {
+      SpreadsheetApp.getUi().alert("❌ Please select valid years!");
+      return;
+    }
+
+    if (fromYear > toYear) {
+      SpreadsheetApp.getUi().alert("❌ 'From Year' must be before 'To Year'!");
+      return;
+    }
+
+    var rawData = raw.getDataRange().getValues();
+    var monthHeaders = getAllMonthHeaders(rawData);
+    var parsed = parseRawData(rawData);
+
+    var currentYear = new Date().getFullYear();
+
+    // Build year range
+    var availableYears = [];
+    for (var y = fromYear; y <= toYear; y++) {
+      availableYears.push(y);
+    }
+
+    var platforms = (selectedPlatform === "All")
+      ? Object.keys(parsed.allData)
+      : (parsed.allData[selectedPlatform] ? [selectedPlatform] : []);
+
+    clearYearlyContent(dash);
+
+    var nc = 10;
+    var row = 6;
+    var rightCol = 12;
+    var rightSpan = 5;
+
+    // Ensure right columns exist
+    var totalCols = dash.getMaxColumns();
+    if (totalCols < rightCol + rightSpan) {
+      dash.insertColumnsAfter(totalCols, (rightCol + rightSpan) - totalCols);
+    }
+    dash.setColumnWidth(11, 20);
+    for (var c = rightCol; c <= rightCol + rightSpan - 1; c++) {
+      dash.setColumnWidth(c, 100);
+    }
+
+    // Current year notification
+    if (toYear >= currentYear) {
+      dash.getRange(row, 1, 1, nc).merge()
+        .setValue("⚠️ NOTE: " + currentYear + " is the current year — data may be incomplete")
+        .setFontSize(9).setFontWeight("bold").setFontColor("#E65100")
+        .setBackground("#FFF3E0").setHorizontalAlignment("center");
+      row++;
+    }
+
+    // ===== YEARLY KPI COMPARISON =====
+    dash.getRange(row, 1, 1, nc).merge()
+      .setValue("📅 YEARLY COMPARISON — " + selectedPlatform + " | " + fromYear + " to " + toYear)
+      .setFontSize(13).setFontWeight("bold")
+      .setBackground("#FF6D00").setFontColor("white").setHorizontalAlignment("center");
+    row++;
+
+    // Headers
+    dash.getRange(row, 1, 1, 2).merge().setValue("Metric")
+      .setFontWeight("bold").setBackground(HEADER_BG).setFontColor("white")
+      .setHorizontalAlignment("center").setFontSize(FONT_SIZES.table);
+
+    var yearColWidth = Math.max(1, Math.min(2, Math.floor((nc - 2) / availableYears.length)));
+    var colIdx = 3;
+    for (var y = 0; y < availableYears.length && colIdx <= nc; y++) {
+      var span = Math.min(yearColWidth, nc - colIdx + 1);
+      var yearLabel = availableYears[y].toString();
+      if (availableYears[y] === currentYear) yearLabel += " ⏳";
+
+      dash.getRange(row, colIdx, 1, span).merge()
+        .setValue(yearLabel)
+        .setFontWeight("bold").setBackground(HEADER_BG).setFontColor("white")
+        .setHorizontalAlignment("center").setFontSize(FONT_SIZES.table);
+      colIdx += span;
+    }
+    row++;
+
+    // Calculate yearly totals
+    var yearlyData = {};
+    for (var y = 0; y < availableYears.length; y++) {
+      var year = availableYears[y];
+      yearlyData[year] = { traffic: 0, followers: 0, posts: 0, impressions: 0, months: 0 };
+
+      var yearMonths = monthHeaders.filter(function(mh) { return mh.year === year; });
+      yearlyData[year].months = yearMonths.length;
+
+      if (parsed.totalTrafficRow > -1 && selectedPlatform === "All") {
+        for (var m = 0; m < yearMonths.length; m++) {
+          yearlyData[year].traffic += cleanNum(rawData[parsed.totalTrafficRow][yearMonths[m].col]);
+        }
+      }
+
+      if (parsed.postCountRow > -1) {
+        for (var m = 0; m < yearMonths.length; m++) {
+          yearlyData[year].posts += cleanNum(rawData[parsed.postCountRow][yearMonths[m].col]);
+        }
+      }
+
+      for (var p = 0; p < platforms.length; p++) {
+        var pMetrics = parsed.allData[platforms[p]];
+        for (var metric in pMetrics) {
+          var mRow = pMetrics[metric];
+          var ml = metric.toLowerCase();
+          for (var m = 0; m < yearMonths.length; m++) {
+            var val = cleanNum(rawData[mRow][yearMonths[m].col]);
+            if (ml.indexOf("traffic") > -1 && selectedPlatform !== "All") yearlyData[year].traffic += val;
+            if ((ml.indexOf("followers") > -1 || ml.indexOf("subscribers") > -1) && m === yearMonths.length - 1) yearlyData[year].followers += val;
+            if (ml.indexOf("impression") > -1) yearlyData[year].impressions += val;
+          }
+        }
+      }
+    }
+
+    // KPI rows
+    var kpiMetrics = [
+      { label: "🌐 Total Traffic", key: "traffic", bg: STATUS_COLORS.positive.bg },
+      { label: "👥 Followers (Latest)", key: "followers", bg: STATUS_COLORS.info.bg },
+      { label: "📝 Total Posts", key: "posts", bg: STATUS_COLORS.neutral.bg },
+      { label: "👁️ Impressions", key: "impressions", bg: "#F3E5F5" },
+      { label: "📅 Months of Data", key: "months", bg: "#E0F2F1" }
+    ];
+
+    for (var k = 0; k < kpiMetrics.length; k++) {
+      var km = kpiMetrics[k];
+
+      dash.getRange(row, 1, 1, 2).merge().setValue(km.label)
+        .setFontWeight("bold").setBackground(km.bg).setFontSize(FONT_SIZES.table);
+
+      colIdx = 3;
+      for (var y = 0; y < availableYears.length && colIdx <= nc; y++) {
+        var span = Math.min(yearColWidth, nc - colIdx + 1);
+        var val = yearlyData[availableYears[y]][km.key];
+        dash.getRange(row, colIdx, 1, span).merge()
+          .setValue(val).setNumberFormat("#,##0").setHorizontalAlignment("center")
+          .setBackground(km.bg).setFontSize(FONT_SIZES.table);
+        colIdx += span;
+      }
+      row++;
+    }
+
+    // YoY Growth row
+    if (availableYears.length >= 2) {
+      dash.getRange(row, 1, 1, 2).merge().setValue("📈 YoY Traffic Growth")
+        .setFontWeight("bold").setBackground("#E8F5E9").setFontSize(FONT_SIZES.table);
+
+      colIdx = 3;
+      for (var y = 0; y < availableYears.length && colIdx <= nc; y++) {
+        var span = Math.min(yearColWidth, nc - colIdx + 1);
+        if (y === 0) {
+          dash.getRange(row, colIdx, 1, span).merge().setValue("-")
+            .setHorizontalAlignment("center").setBackground("#E8F5E9").setFontSize(FONT_SIZES.table);
+        } else {
+          var prevYT = yearlyData[availableYears[y - 1]].traffic;
+          var currYT = yearlyData[availableYears[y]].traffic;
+          var yoyG = prevYT > 0 ? (((currYT - prevYT) / prevYT) * 100).toFixed(1) : "N/A";
+          var yoyC = yoyG !== "N/A" && parseFloat(yoyG) >= 0 ? STATUS_COLORS.positive.font : STATUS_COLORS.negative.font;
+          var yoyP = yoyG !== "N/A" && parseFloat(yoyG) >= 0 ? "+" : "";
+          dash.getRange(row, colIdx, 1, span).merge()
+            .setValue(yoyG === "N/A" ? "N/A" : yoyP + yoyG + "%")
+            .setFontColor(yoyC).setFontWeight("bold")
+            .setHorizontalAlignment("center").setBackground("#E8F5E9").setFontSize(FONT_SIZES.table);
+        }
+        colIdx += span;
+      }
+      row++;
+    }
+
+    row += 2;
+
+    // ===== YEARLY TRAFFIC BY PLATFORM =====
+    dash.getRange(row, 1, 1, nc).merge()
+      .setValue("📈 YEARLY TRAFFIC BY PLATFORM")
+      .setFontSize(FONT_SIZES.normal).setFontWeight("bold")
+      .setBackground("#34a853").setFontColor("white").setHorizontalAlignment("center");
+    row++;
+
+    dash.getRange(row, 1, 1, 2).merge().setValue("Platform")
+      .setFontWeight("bold").setBackground(HEADER_BG).setFontColor("white")
+      .setHorizontalAlignment("center").setFontSize(FONT_SIZES.table);
+
+    colIdx = 3;
+    for (var y = 0; y < availableYears.length && colIdx <= nc; y++) {
+      var span = Math.min(yearColWidth, nc - colIdx + 1);
+      dash.getRange(row, colIdx, 1, span).merge()
+        .setValue(availableYears[y].toString())
+        .setFontWeight("bold").setBackground(HEADER_BG).setFontColor("white")
+        .setHorizontalAlignment("center").setFontSize(FONT_SIZES.table);
+      colIdx += span;
+    }
+
+    if (colIdx + 1 <= nc) {
+      dash.getRange(row, colIdx, 1, nc - colIdx + 1).merge().setValue("Trend")
+        .setFontWeight("bold").setBackground(HEADER_BG).setFontColor("white")
+        .setHorizontalAlignment("center").setFontSize(FONT_SIZES.table);
+    }
+    row++;
+
+    for (var p = 0; p < platforms.length; p++) {
+      var pName = platforms[p];
+      var pMetrics = parsed.allData[pName];
+      var bg = (PLATFORM_COLORS[pName] || { light: "#FFF" }).light;
+      var trendVals = [];
+
+      dash.getRange(row, 1, 1, 2).merge().setValue(pName)
+        .setFontWeight("bold").setBackground(bg).setFontSize(FONT_SIZES.table);
+
+      colIdx = 3;
+      for (var y = 0; y < availableYears.length && colIdx <= nc; y++) {
+        var year = availableYears[y];
+        var span = Math.min(yearColWidth, nc - colIdx + 1);
+        var yearTotal = 0;
+
+        for (var metric in pMetrics) {
+          if (metric.toLowerCase().indexOf("traffic") > -1) {
+            var yearMonths = monthHeaders.filter(function(mh) { return mh.year === year; });
+            for (var m = 0; m < yearMonths.length; m++) {
+              yearTotal += cleanNum(rawData[pMetrics[metric]][yearMonths[m].col]);
+            }
+            break;
+          }
+        }
+
+        trendVals.push(yearTotal);
+        dash.getRange(row, colIdx, 1, span).merge()
+          .setValue(yearTotal > 0 ? yearTotal : "-")
+          .setNumberFormat("#,##0").setHorizontalAlignment("center")
+          .setBackground(bg).setFontSize(FONT_SIZES.table);
+        colIdx += span;
+      }
+
+      if (colIdx + 1 <= nc && trendVals.length > 1 && trendVals.some(function(v) { return v > 0; })) {
+        var lastV = trendVals[trendVals.length - 1];
+        var prevV = trendVals[trendVals.length - 2];
+        var sColor = lastV >= prevV ? "#1B5E20" : "#B71C1C";
+        dash.getRange(row, colIdx, 1, nc - colIdx + 1).merge().setBackground(bg);
+        try {
+          dash.getRange(row, colIdx).setFormula(
+            '=SPARKLINE({' + trendVals.join(",") + '},{"charttype","line";"color","' + sColor + '";"linewidth",2})'
+          );
+        } catch (e) {
+          dash.getRange(row, colIdx).setValue("—").setHorizontalAlignment("center");
+        }
+      } else if (colIdx + 1 <= nc) {
+        dash.getRange(row, colIdx, 1, nc - colIdx + 1).merge().setBackground(bg)
+          .setValue("—").setHorizontalAlignment("center").setFontColor("#ccc");
+      }
+      row++;
+    }
+
+    row += 2;
+
+    // ===== DETAILED YEARLY METRICS =====
+    dash.getRange(row, 1, 1, nc).merge()
+      .setValue("📋 DETAILED YEARLY METRICS")
+      .setFontSize(FONT_SIZES.normal).setFontWeight("bold")
+      .setBackground(PRIMARY_BLUE).setFontColor("white").setHorizontalAlignment("center");
+    row++;
+
+    for (var p = 0; p < platforms.length; p++) {
+      var pName = platforms[p];
+      var pMetrics = parsed.allData[pName];
+      var pColor = (PLATFORM_COLORS[pName] || { dark: "#333" }).dark;
+      var pBg = (PLATFORM_COLORS[pName] || { light: "#FFF" }).light;
+
+      dash.getRange(row, 1, 1, nc).merge().setValue(pName)
+        .setFontWeight("bold").setFontSize(FONT_SIZES.table)
+        .setBackground(pColor).setFontColor("white").setHorizontalAlignment("center");
+      row++;
+
+      dash.getRange(row, 1, 1, 2).merge().setValue("Metric")
+        .setFontWeight("bold").setBackground("#f1f3f4").setFontSize(FONT_SIZES.table).setHorizontalAlignment("center");
+
+      colIdx = 3;
+      for (var y = 0; y < availableYears.length && colIdx <= nc; y++) {
+        var span = Math.min(yearColWidth, nc - colIdx + 1);
+        dash.getRange(row, colIdx, 1, span).merge()
+          .setValue(availableYears[y].toString())
+          .setFontWeight("bold").setBackground("#f1f3f4").setFontSize(FONT_SIZES.table).setHorizontalAlignment("center");
+        colIdx += span;
+      }
+
+      if (colIdx + 1 <= nc) {
+        dash.getRange(row, colIdx, 1, nc - colIdx + 1).merge().setValue("YoY %")
+          .setFontWeight("bold").setBackground("#f1f3f4").setFontSize(FONT_SIZES.table).setHorizontalAlignment("center");
+      }
+      row++;
+
+      for (var metric in pMetrics) {
+        var mRow = pMetrics[metric];
+        var ml = metric.toLowerCase();
+
+        dash.getRange(row, 1, 1, 2).merge().setValue(metric)
+          .setFontWeight("bold").setBackground(pBg).setFontSize(FONT_SIZES.table);
+
+        var yearVals = [];
+        colIdx = 3;
+        for (var y = 0; y < availableYears.length && colIdx <= nc; y++) {
+          var year = availableYears[y];
+          var span = Math.min(yearColWidth, nc - colIdx + 1);
+          var yearTotal = 0;
+
+          var yearMonths = monthHeaders.filter(function(mh) { return mh.year === year; });
+
+          if (ml.indexOf("followers") > -1 || ml.indexOf("subscribers") > -1) {
+            if (yearMonths.length > 0) {
+              yearTotal = cleanNum(rawData[mRow][yearMonths[yearMonths.length - 1].col]);
+            }
+          } else {
+            for (var m = 0; m < yearMonths.length; m++) {
+              yearTotal += cleanNum(rawData[mRow][yearMonths[m].col]);
+            }
+          }
+
+          yearVals.push(yearTotal);
+          dash.getRange(row, colIdx, 1, span).merge()
+            .setValue(yearTotal > 0 ? yearTotal : "-")
+            .setNumberFormat("#,##0").setHorizontalAlignment("center")
+            .setBackground(pBg).setFontSize(FONT_SIZES.table);
+          colIdx += span;
+        }
+
+        if (colIdx + 1 <= nc && yearVals.length >= 2) {
+          var lv = yearVals[yearVals.length - 1];
+          var pv = yearVals[yearVals.length - 2];
+          var yc = pv > 0 ? (((lv - pv) / pv) * 100).toFixed(1) : "N/A";
+          var ycColor = yc !== "N/A" && parseFloat(yc) >= 0 ? STATUS_COLORS.positive.font : STATUS_COLORS.negative.font;
+          var ycPre = yc !== "N/A" && parseFloat(yc) >= 0 ? "+" : "";
+
+          dash.getRange(row, colIdx, 1, nc - colIdx + 1).merge()
+            .setValue(yc === "N/A" ? "-" : ycPre + yc + "%")
+            .setFontColor(ycColor).setFontWeight("bold")
+            .setHorizontalAlignment("center").setBackground(pBg).setFontSize(FONT_SIZES.table);
+        } else if (colIdx + 1 <= nc) {
+          dash.getRange(row, colIdx, 1, nc - colIdx + 1).merge()
+            .setValue("-").setHorizontalAlignment("center").setBackground(pBg).setFontSize(FONT_SIZES.table);
+        }
+        row++;
+      }
+
+      dash.getRange(row, 1, 1, nc).merge().setBackground("#FFFFFF");
+      row++;
+    }
+
+    // ===== RIGHT PANEL: YEARLY SUMMARY =====
+    renderYearlySummaryPanel(dash, yearlyData, availableYears, platforms, parsed, rawData, monthHeaders,
+      selectedPlatform, currentYear, rightCol, rightSpan);
+
+    // ===== FOOTER =====
+    row++;
+    dash.getRange(row, 1, 1, nc).merge()
+      .setValue("📅 Yearly Dashboard  |  Generated: " + new Date().toLocaleString())
+      .setFontSize(8).setFontColor("#999999").setHorizontalAlignment("center");
+
+    SpreadsheetApp.getUi().alert("✅ Yearly Dashboard refreshed!");
+  } catch (e) {
+    SpreadsheetApp.getUi().alert("❌ Error: " + e.message);
+  }
+}
+
+function renderYearlySummaryPanel(dash, yearlyData, availableYears, platforms, parsed, rawData, monthHeaders,
+  selectedPlatform, currentYear, startCol, span) {
+
+  var sc = startCol;
+  var row = 1;
+
+  // Title
+  dash.getRange(row, sc, 1, span).merge()
+    .setValue("📋 YEARLY SUMMARY")
+    .setFontSize(13).setFontWeight("bold")
+    .setBackground("#FF6D00").setFontColor("white").setHorizontalAlignment("center");
+  row++;
+
+  dash.getRange(row, sc, 1, span).merge()
+    .setValue(availableYears[0] + " — " + availableYears[availableYears.length - 1] + " | " + selectedPlatform)
+    .setFontSize(9).setFontColor("#666").setBackground(STATUS_COLORS.info.bg).setHorizontalAlignment("center");
+  row++;
+
+  // Current year warning
+  if (availableYears.indexOf(currentYear) > -1) {
+    row++;
+    dash.getRange(row, sc, 1, span).merge()
+      .setValue("⚠️ " + currentYear + " IN PROGRESS")
+      .setFontSize(10).setFontWeight("bold").setFontColor("#E65100")
+      .setBackground("#FFF3E0").setHorizontalAlignment("center");
+    row++;
+
+    var currentYearMonths = yearlyData[currentYear] ? yearlyData[currentYear].months : 0;
+    dash.getRange(row, sc, 1, span).merge()
+      .setValue(currentYearMonths + "/12 months of data available")
+      .setFontSize(9).setFontColor("#333").setBackground("#FFF9C4").setHorizontalAlignment("center");
+    row++;
+  }
+
+  row++;
+
+  // Overall traffic trend
+  dash.getRange(row, sc, 1, span).merge()
+    .setValue("📊 TRAFFIC TREND")
+    .setFontSize(10).setFontWeight("bold")
+    .setBackground("#34a853").setFontColor("white").setHorizontalAlignment("center");
+  row++;
+
+  for (var y = 0; y < availableYears.length; y++) {
+    var year = availableYears[y];
+    var yd = yearlyData[year];
+    var bg = y % 2 === 0 ? "#F5F5F5" : "#FFFFFF";
+    var yearLabel = year.toString();
+    if (year === currentYear) yearLabel += " ⏳";
+
+    dash.getRange(row, sc, 1, 2).merge().setValue(yearLabel)
+      .setFontWeight("bold").setBackground(bg).setFontSize(9);
+    dash.getRange(row, sc + 2, 1, span - 2).merge()
+      .setValue(formatNumber(yd.traffic))
+      .setNumberFormat("#,##0").setHorizontalAlignment("center").setBackground(bg).setFontSize(9);
+    row++;
+  }
+
+  row++;
+
+  // Best year
+  var bestYear = availableYears[0];
+  var bestTraffic = yearlyData[bestYear].traffic;
+  for (var y = 1; y < availableYears.length; y++) {
+    if (yearlyData[availableYears[y]].traffic > bestTraffic) {
+      bestYear = availableYears[y];
+      bestTraffic = yearlyData[bestYear].traffic;
+    }
+  }
+
+  dash.getRange(row, sc, 1, span).merge()
+    .setValue("🏆 BEST YEAR")
+    .setFontSize(10).setFontWeight("bold")
+    .setBackground("#FF6D00").setFontColor("white").setHorizontalAlignment("center");
+  row++;
+
+  dash.getRange(row, sc, 1, span).merge()
+    .setValue(bestYear.toString() + (bestYear === currentYear ? " ⏳" : ""))
+    .setFontSize(16).setFontWeight("bold").setFontColor("#333")
+    .setBackground(STATUS_COLORS.positive.bg).setHorizontalAlignment("center");
+  row++;
+
+  dash.getRange(row, sc, 1, span).merge()
+    .setValue(formatNumber(bestTraffic) + " total visits")
+    .setFontSize(9).setHorizontalAlignment("center").setBackground("#f1f3f4");
+  row += 2;
+
+  // Overall growth
+  if (availableYears.length >= 2) {
+    var firstTraffic = yearlyData[availableYears[0]].traffic;
+    var lastTraffic = yearlyData[availableYears[availableYears.length - 1]].traffic;
+
+    dash.getRange(row, sc, 1, span).merge()
+      .setValue("📈 OVERALL GROWTH")
+      .setFontSize(10).setFontWeight("bold")
+      .setBackground(PRIMARY_BLUE).setFontColor("white").setHorizontalAlignment("center");
+    row++;
+
+    if (firstTraffic > 0) {
+      var overallGrowth = (((lastTraffic - firstTraffic) / firstTraffic) * 100).toFixed(1);
+      var ogColor = parseFloat(overallGrowth) >= 0 ? STATUS_COLORS.positive.font : STATUS_COLORS.negative.font;
+      var ogBg = parseFloat(overallGrowth) >= 0 ? STATUS_COLORS.positive.bg : STATUS_COLORS.negative.bg;
+      var ogPre = parseFloat(overallGrowth) >= 0 ? "+" : "";
+
+      dash.getRange(row, sc, 1, span).merge()
+        .setValue(ogPre + overallGrowth + "%")
+        .setFontSize(20).setFontWeight("bold").setFontColor(ogColor)
+        .setBackground(ogBg).setHorizontalAlignment("center");
+      row++;
+
+      dash.getRange(row, sc, 1, span).merge()
+        .setValue(availableYears[0] + ": " + formatNumber(firstTraffic) + " → " + availableYears[availableYears.length - 1] + ": " + formatNumber(lastTraffic))
+        .setFontSize(8).setHorizontalAlignment("center").setBackground("#f1f3f4");
+      row++;
+    } else {
+      dash.getRange(row, sc, 1, span).merge()
+        .setValue("No baseline data for " + availableYears[0])
+        .setFontSize(9).setFontColor("#999").setHorizontalAlignment("center").setBackground("#f1f3f4");
+      row++;
+    }
+  }
+
+  row++;
+
+  // Top platform per year
+  dash.getRange(row, sc, 1, span).merge()
+    .setValue("🏆 TOP PLATFORM / YEAR")
+    .setFontSize(10).setFontWeight("bold")
+    .setBackground("#7B1FA2").setFontColor("white").setHorizontalAlignment("center");
+  row++;
+
+  for (var y = 0; y < availableYears.length; y++) {
+    var year = availableYears[y];
+    var yearMonths = monthHeaders.filter(function(mh) { return mh.year === year; });
+    var topPlatform = "";
+    var topTraffic = 0;
+
+    for (var p = 0; p < platforms.length; p++) {
+      var pMetrics = parsed.allData[platforms[p]];
+      var pTraffic = 0;
+      for (var metric in pMetrics) {
+        if (metric.toLowerCase().indexOf("traffic") > -1) {
+          for (var m = 0; m < yearMonths.length; m++) {
+            pTraffic += cleanNum(rawData[pMetrics[metric]][yearMonths[m].col]);
+          }
+          break;
+        }
+      }
+      if (pTraffic > topTraffic) {
+        topTraffic = pTraffic;
+        topPlatform = platforms[p];
+      }
+    }
+
+    var bg = y % 2 === 0 ? "#F5F5F5" : "#FFFFFF";
+    var pBg = topPlatform ? (PLATFORM_COLORS[topPlatform] || { light: bg }).light : bg;
+
+    dash.getRange(row, sc, 1, 1).setValue(year.toString())
+      .setFontWeight("bold").setBackground(pBg).setFontSize(8);
+    dash.getRange(row, sc + 1, 1, 2).merge().setValue(topPlatform || "-")
+      .setFontWeight("bold").setBackground(pBg).setFontSize(8);
+    dash.getRange(row, sc + 3, 1, span - 3).merge()
+      .setValue(topTraffic > 0 ? formatNumber(topTraffic) : "-")
+      .setHorizontalAlignment("center").setBackground(pBg).setFontSize(8);
+    row++;
+  }
+}
+
+function clearYearlyContent(dash) {
+  var lastRow = Math.max(dash.getLastRow(), 6);
+  var lastCol = Math.max(dash.getLastColumn(), 17);
+  if (lastRow > 5) {
+    dash.getRange(6, 1, lastRow - 4, 10).clear();
+  }
+  try {
+    dash.getRange(1, 12, lastRow, 6).clear();
+  } catch (e) {}
+
+  var existingCharts = dash.getCharts();
+  for (var i = 0; i < existingCharts.length; i++) {
+    dash.removeChart(existingCharts[i]);
+  }
+}
