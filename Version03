@@ -1,0 +1,2378 @@
+// ============================================
+// ========= CONSTANTS ========================
+// ============================================
+
+var LOGO_FILE_ID = "1BPRWdohJuMLZeJvaSN0z0QWPCCy5gvhP";
+
+var PLATFORMS = ["Facebook", "LinkedIn", "Twitter", "Youtube", "Reddit", "Threads", "Quora"];
+
+var PLATFORM_COLORS = {
+  "Facebook": { dark: "#4267B2", light: "#E8F0FE", font: "white" },
+  "LinkedIn": { dark: "#0077B5", light: "#E3F2FD", font: "white" },
+  "Twitter":  { dark: "#1DA1F2", light: "#E1F5FE", font: "white" },
+  "Youtube":  { dark: "#FF0000", light: "#FFEBEE", font: "white" },
+  "Reddit":   { dark: "#FF4500", light: "#FFF3E0", font: "white" },
+  "Threads":  { dark: "#000000", light: "#F3E5F5", font: "white" },
+  "Quora":    { dark: "#B92B27", light: "#FCE4EC", font: "white" }
+};
+
+var STATUS_COLORS = {
+  positive:   { font: "#1B5E20", bg: "#e6f4ea" },
+  negative:   { font: "#B71C1C", bg: "#fce8e6" },
+  neutral:    { font: "#F57F17", bg: "#FFF9C4" },
+  info:       { font: "#1565C0", bg: "#e8f0fe" }
+};
+
+var HEADER_BG = "#263238";
+var PRIMARY_BLUE = "#1a73e8";
+
+var FONT_SIZES = {
+  heading: 16,
+  normal: 12,
+  table: 11
+};
+
+
+// ============================================
+// ========= MENU SETUP =======================
+// ============================================
+
+function onOpen() {
+  var ui = SpreadsheetApp.getUi();
+  ui.createMenu("📊 Social Media")
+    .addItem("🎨 Format Raw Data", "formatSections")
+    .addItem("📅 Convert Headers to Dates", "convertHeadersToDates")
+    .addItem("↔️ Add 20 Extra Columns", "ensureScrollableColumns")
+    .addSeparator()
+    .addSubMenu(ui.createMenu("📊 Build Dashboard")
+      .addSubMenu(ui.createMenu("📊 General")
+        .addItem("📊 Build General Dashboard", "buildDashboard")
+        .addItem("🔄 Refresh General Dashboard", "refreshDashboard"))
+      .addSubMenu(ui.createMenu("📆 Quarterly")
+        .addItem("📊 Build Quarterly Dashboard", "buildQuarterlyDashboard")
+        .addItem("🔄 Refresh Quarterly Dashboard", "refreshQuarterlyDashboard"))
+      .addSubMenu(ui.createMenu("📅 Yearly")
+        .addItem("📊 Build Yearly Dashboard", "buildYearlyDashboard")
+        .addItem("🔄 Refresh Yearly Dashboard", "refreshYearlyDashboard")))
+    .addSeparator()
+    .addSubMenu(ui.createMenu("⚡ Quick View")
+      .addItem("📱 Facebook", "viewFacebook")
+      .addItem("💼 LinkedIn", "viewLinkedIn")
+      .addItem("🐦 Twitter", "viewTwitter")
+      .addItem("▶️ YouTube", "viewYoutube")
+      .addItem("🟠 Reddit", "viewReddit")
+      .addItem("🔵 Threads", "viewThreads")
+      .addItem("❓ Quora", "viewQuora")
+      .addItem("📊 All Platforms", "viewAll"))
+    .addSubMenu(ui.createMenu("📅 Quick Year")
+      .addItem("2023", "viewYear2023")
+      .addItem("2024", "viewYear2024")
+      .addItem("2025", "viewYear2025")
+      .addItem("2026", "viewYear2026"))
+    .addSeparator()
+    .addSubMenu(ui.createMenu("🔀 Compare")
+      .addItem("📊 Compare Months (Single Platform)", "compareMonths")
+      .addItem("📊 Compare All Platforms", "compareAllPlatforms"))
+    .addSeparator()
+    .addItem("➕ Add New Month Column", "addNewMonthWithCalendar")
+    .addItem("🔍 Jump to Platform + Month", "jumpToData")
+    .addItem("📋 Show All Months", "showAllMonthsDirect")
+    .addSeparator()
+    .addItem("📧 Email Monthly Report", "emailReport")
+    .addToUi();
+}
+
+
+// ============================================
+// ========= SIDEBAR SELECTORS ================
+// ============================================
+
+function showPlatformSelector() {
+  var html = HtmlService.createHtmlOutput(
+    '<style>' +
+      'body{font-family:Arial,sans-serif;padding:15px}' +
+      'h3{color:#1a73e8;margin-bottom:10px}' +
+      'select,input[type="month"]{width:100%;padding:10px;font-size:14px;margin:10px 0;border-radius:5px;border:2px solid #1a73e8;box-sizing:border-box}' +
+      'button{width:100%;padding:12px;font-size:14px;background:#1a73e8;color:white;border:none;border-radius:5px;cursor:pointer;margin-top:10px}' +
+      'button:hover{background:#1557b0}' +
+      '.label{font-weight:bold;font-size:13px;margin-top:15px;display:block}' +
+    '</style>' +
+    '<h3>📊 Select Options</h3>' +
+    '<span class="label">🏢 Platform:</span>' +
+    '<select id="platform">' +
+      '<option value="Facebook">📱 Facebook</option>' +
+      '<option value="LinkedIn">💼 LinkedIn</option>' +
+      '<option value="Twitter">🐦 Twitter</option>' +
+      '<option value="Youtube">▶️ YouTube</option>' +
+      '<option value="Reddit">🟠 Reddit</option>' +
+      '<option value="Threads">🔵 Threads</option>' +
+      '<option value="Quora">❓ Quora</option>' +
+    '</select>' +
+    '<span class="label">📅 First Month:</span>' +
+    '<input type="month" id="month1">' +
+    '<span class="label">📅 Second Month:</span>' +
+    '<input type="month" id="month2">' +
+    '<button onclick="submitCompare()">🔀 Compare</button>' +
+    '<script>' +
+      'var now=new Date();var lm=new Date(now.getFullYear(),now.getMonth()-1,1);' +
+      'document.getElementById("month2").value=now.getFullYear()+"-"+String(now.getMonth()+1).padStart(2,"0");' +
+      'document.getElementById("month1").value=lm.getFullYear()+"-"+String(lm.getMonth()+1).padStart(2,"0");' +
+      'function submitCompare(){' +
+        'var p=document.getElementById("platform").value;' +
+        'var m1=document.getElementById("month1").value;' +
+        'var m2=document.getElementById("month2").value;' +
+        'if(!m1||!m2){alert("Please select both months!");return}' +
+        'google.script.run.withSuccessHandler(function(){google.script.host.close()}).runCompareMonths(p,m1,m2);' +
+      '}' +
+    '</script>'
+  )
+  .setWidth(320)
+  .setHeight(420)
+  .setTitle("Compare Months");
+
+  SpreadsheetApp.getUi().showSidebar(html);
+}
+
+function showAllPlatformsSelector() {
+  var html = HtmlService.createHtmlOutput(
+    '<style>' +
+      'body{font-family:Arial,sans-serif;padding:15px}' +
+      'h3{color:#1a73e8;margin-bottom:10px}' +
+      'input[type="month"]{width:100%;padding:10px;font-size:14px;margin:10px 0;border-radius:5px;border:2px solid #1a73e8;box-sizing:border-box}' +
+      'button{width:100%;padding:12px;font-size:14px;background:#1a73e8;color:white;border:none;border-radius:5px;cursor:pointer;margin-top:10px}' +
+      'button:hover{background:#1557b0}' +
+      '.label{font-weight:bold;font-size:13px;margin-top:15px;display:block}' +
+    '</style>' +
+    '<h3>📊 Compare All Platforms</h3>' +
+    '<span class="label">📅 First Month:</span>' +
+    '<input type="month" id="month1">' +
+    '<span class="label">📅 Second Month:</span>' +
+    '<input type="month" id="month2">' +
+    '<button onclick="submitCompare()">🔀 Compare All Platforms</button>' +
+    '<script>' +
+      'var now=new Date();var lm=new Date(now.getFullYear(),now.getMonth()-1,1);' +
+      'document.getElementById("month2").value=now.getFullYear()+"-"+String(now.getMonth()+1).padStart(2,"0");' +
+      'document.getElementById("month1").value=lm.getFullYear()+"-"+String(lm.getMonth()+1).padStart(2,"0");' +
+      'function submitCompare(){' +
+        'var m1=document.getElementById("month1").value;' +
+        'var m2=document.getElementById("month2").value;' +
+        'if(!m1||!m2){alert("Select both months!");return}' +
+        'google.script.run.withSuccessHandler(function(){google.script.host.close()}).runCompareAllPlatforms(m1,m2);' +
+      '}' +
+    '</script>'
+  )
+  .setWidth(320)
+  .setHeight(350)
+  .setTitle("Compare All Platforms");
+
+  SpreadsheetApp.getUi().showSidebar(html);
+}
+
+function showEmailReportSelector() {
+  var html = HtmlService.createHtmlOutput(
+    '<style>' +
+      'body{font-family:Arial,sans-serif;padding:15px}' +
+      'h3{color:#1a73e8;margin-bottom:10px}' +
+      'input,select{width:100%;padding:10px;font-size:14px;margin:8px 0;border-radius:5px;border:2px solid #1a73e8;box-sizing:border-box}' +
+      'button{width:100%;padding:12px;font-size:14px;background:#1a73e8;color:white;border:none;border-radius:5px;cursor:pointer;margin-top:15px}' +
+      'button:hover{background:#1557b0}' +
+      '.label{font-weight:bold;font-size:13px;margin-top:12px;display:block}' +
+      '.note{font-size:11px;color:#666;margin-top:5px}' +
+      '.optional{font-size:11px;color:#999}' +
+    '</style>' +
+    '<h3>📧 Monthly Report</h3>' +
+    '<span class="label">👤 Recipient Name:</span>' +
+    '<input type="text" id="recipientName" placeholder="e.g., John">' +
+    '<span class="label">📧 Send To (Email):</span>' +
+    '<input type="email" id="email" placeholder="you@company.com">' +
+    '<span class="label">📧 CC <span class="optional">(optional, comma-separated)</span>:</span>' +
+    '<input type="email" id="ccEmail" placeholder="manager@company.com">' +
+    '<span class="label">📅 Select Month:</span>' +
+    '<input type="month" id="reportMonth">' +
+    '<p class="note">Report will include: Traffic summary, top platforms, post count, and dashboard link.</p>' +
+    '<button onclick="sendReport()">📧 Send Report</button>' +
+    '<script>' +
+      'var now=new Date();' +
+      'document.getElementById("reportMonth").value=now.getFullYear()+"-"+String(now.getMonth()+1).padStart(2,"0");' +
+      'function sendReport(){' +
+        'var name=document.getElementById("recipientName").value;' +
+        'var email=document.getElementById("email").value;' +
+        'var cc=document.getElementById("ccEmail").value;' +
+        'var month=document.getElementById("reportMonth").value;' +
+        'if(!name){alert("Enter recipient name!");return}' +
+        'if(!email){alert("Enter email address!");return}' +
+        'if(!month){alert("Select a month!");return}' +
+        'document.querySelector("button").textContent="⏳ Sending...";' +
+        'document.querySelector("button").disabled=true;' +
+        'google.script.run.withSuccessHandler(function(){alert("✅ Report sent!");google.script.host.close()}).runEmailReport(month,email,name,cc);' +
+      '}' +
+    '</script>'
+  )
+  .setWidth(320)
+  .setHeight(480)
+  .setTitle("Email Report");
+
+  SpreadsheetApp.getUi().showSidebar(html);
+}
+
+
+// ============================================
+// ========= MENU ENTRY POINTS ================
+// ============================================
+
+function compareMonths() { showPlatformSelector(); }
+function compareAllPlatforms() { showAllPlatformsSelector(); }
+function emailReport() { showEmailReportSelector(); }
+
+
+// ============================================
+// ========= DATA PARSING ENGINE ==============
+// ============================================
+
+function parseRawData(rawData) {
+  var result = {
+    allData: {},
+    postCountRow: -1,
+    totalTrafficRow: -1
+  };
+
+  var currentPlatform = "";
+
+  for (var row = 1; row < rawData.length; row++) {
+    var label = rawData[row][0] ? rawData[row][0].toString().trim() : "";
+
+    if (label === "Post Count") {
+      result.postCountRow = row;
+      continue;
+    }
+    if (label === "Total number of traffics") {
+      result.totalTrafficRow = row;
+      continue;
+    }
+    if (PLATFORMS.indexOf(label) > -1) {
+      currentPlatform = label;
+      if (!result.allData[currentPlatform]) result.allData[currentPlatform] = {};
+      continue;
+    }
+    if (currentPlatform && label && label !== "Platforms") {
+      result.allData[currentPlatform][label] = row;
+    }
+  }
+
+  return result;
+}
+
+function getPlatformMetrics(rawData, parsed, platformName, col, prevCol) {
+  var pMetrics = parsed.allData[platformName];
+  if (!pMetrics) return null;
+
+  var traffic = 0, prevTraffic = 0, followers = 0, details = {};
+
+  for (var metric in pMetrics) {
+    var mRow = pMetrics[metric];
+    var val = cleanNum(rawData[mRow][col]);
+    var prevVal = prevCol > -1 ? cleanNum(rawData[mRow][prevCol]) : 0;
+    var ml = metric.toLowerCase();
+
+    details[metric] = { current: val, previous: prevVal };
+
+    if (ml.indexOf("traffic") > -1) {
+      traffic = val;
+      prevTraffic = prevVal;
+    }
+    if (ml.indexOf("followers") > -1 || ml.indexOf("subscribers") > -1) {
+      followers = val;
+    }
+  }
+
+  var trafficChange = prevTraffic > 0 ? (((traffic - prevTraffic) / prevTraffic) * 100).toFixed(1) : "N/A";
+
+  return {
+    name: platformName,
+    traffic: traffic,
+    prevTraffic: prevTraffic,
+    trafficChange: trafficChange,
+    followers: followers,
+    details: details
+  };
+}
+
+function getAllPlatformReports(rawData, parsed, platforms, col, prevCol) {
+  var reports = [];
+  for (var i = 0; i < platforms.length; i++) {
+    var report = getPlatformMetrics(rawData, parsed, platforms[i], col, prevCol);
+    if (report) reports.push(report);
+  }
+  reports.sort(function(a, b) { return b.traffic - a.traffic; });
+  return reports;
+}
+
+function findPrevMonthCol(monthHeaders, currentCol) {
+  for (var h = 0; h < monthHeaders.length; h++) {
+    if (monthHeaders[h].col === currentCol && h > 0) {
+      return monthHeaders[h - 1].col;
+    }
+  }
+  return -1;
+}
+
+function getStatusText(changeVal) {
+  if (changeVal === "N/A") return "⚪ N/A";
+  var val = parseFloat(changeVal);
+  if (val > 10) return "🟢 Strong Growth";
+  if (val > 0) return "🟡 Slight Growth";
+  if (val === 0) return "⚪ No Change";
+  if (val > -10) return "🟡 Slight Decline";
+  return "🔴 Significant Drop";
+}
+
+function getChangeColor(diff) {
+  return diff >= 0 ? STATUS_COLORS.positive.font : STATUS_COLORS.negative.font;
+}
+
+function getChangePrefix(diff) {
+  return diff >= 0 ? "+" : "";
+}
+
+
+// ============================================
+// ========= COMPARE MONTHS ===================
+// ============================================
+
+function runCompareMonths(platform, month1Str, month2Str) {
+  try {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var raw = ss.getSheetByName("Raw Data");
+    if (!raw) { SpreadsheetApp.getUi().alert("❌ 'Raw Data' sheet not found!"); return; }
+
+    var rawData = raw.getDataRange().getValues();
+    var monthHeaders = getAllMonthHeaders(rawData);
+
+    var m1 = parseCalendarMonth(month1Str);
+    var m2 = parseCalendarMonth(month2Str);
+
+    var col1 = findMonthColumn(monthHeaders, m1.month, m1.year);
+    var col2 = findMonthColumn(monthHeaders, m2.month, m2.year);
+
+    if (col1 === -1 || col2 === -1) {
+      SpreadsheetApp.getUi().alert("❌ Month not found in your data!\n\nMake sure the month exists in your Raw Data headers.");
+      return;
+    }
+
+    var month1Label = m1.month + " " + m1.year;
+    var month2Label = m2.month + " " + m2.year;
+
+    var parsed = parseRawData(rawData);
+    var pMetrics = parsed.allData[platform];
+    if (!pMetrics) { SpreadsheetApp.getUi().alert("❌ Platform not found: " + platform); return; }
+
+    var metrics = [];
+    for (var metric in pMetrics) {
+      var mRow = pMetrics[metric];
+      var v1 = cleanNum(rawData[mRow][col1]);
+      var v2 = cleanNum(rawData[mRow][col2]);
+      var change = v1 > 0 ? (((v2 - v1) / v1) * 100).toFixed(1) : "N/A";
+      metrics.push({ name: metric, val1: v1, val2: v2, diff: v2 - v1, change: change });
+    }
+
+    var comp = ss.getSheetByName("Comparison");
+    if (comp) comp.clear(); else comp = ss.insertSheet("Comparison");
+
+    var pColor = PLATFORM_COLORS[platform] || { dark: PRIMARY_BLUE, light: "#FFF" };
+    var numCols = 7;
+
+    comp.getRange(1, 1, 1, numCols).merge()
+      .setValue("📊 " + platform.toUpperCase() + " — MONTH COMPARISON")
+      .setFontSize(FONT_SIZES.heading).setFontWeight("bold")
+      .setBackground(pColor.dark).setFontColor("white")
+      .setHorizontalAlignment("center");
+
+    comp.getRange(2, 1, 1, numCols).merge()
+      .setValue(month1Label + "  ⟷  " + month2Label)
+      .setFontSize(13).setHorizontalAlignment("center")
+      .setBackground(STATUS_COLORS.info.bg).setFontWeight("bold");
+
+    var tableHeaders = ["Metric", month1Label, month2Label, "Change", "Change %", "Status", "Visual"];
+    comp.getRange(4, 1, 1, numCols).setValues([tableHeaders])
+      .setFontWeight("bold").setFontSize(FONT_SIZES.table)
+      .setBackground(HEADER_BG).setFontColor("white")
+      .setHorizontalAlignment("center");
+
+    var dataValues = [];
+    var dataBgs = [];
+    var dataFontColors = [];
+    var dataFontWeights = [];
+    var sparklineRows = [];
+
+    for (var i = 0; i < metrics.length; i++) {
+      var m = metrics[i];
+      var changeColor = getChangeColor(m.diff);
+      var prefix = getChangePrefix(m.diff);
+      var status = getStatusText(m.change);
+      var bg = pColor.light;
+
+      dataValues.push([m.name, m.val1, m.val2, prefix + m.diff, m.change === "N/A" ? "N/A" : m.change + "%", status, ""]);
+      dataBgs.push([bg, bg, bg, bg, bg, bg, bg]);
+      dataFontColors.push(["#333", "#333", "#333", changeColor, changeColor, "#333", "#333"]);
+      dataFontWeights.push(["bold", "normal", "normal", "bold", "normal", "normal", "normal"]);
+      sparklineRows.push({ row: 5 + i, v1: m.val1, v2: m.val2 });
+    }
+
+    if (dataValues.length > 0) {
+      var dataRange = comp.getRange(5, 1, dataValues.length, numCols);
+      dataRange.setValues(dataValues);
+      dataRange.setBackgrounds(dataBgs);
+      dataRange.setFontColors(dataFontColors);
+      dataRange.setFontWeights(dataFontWeights);
+      dataRange.setHorizontalAlignment("center");
+      dataRange.setFontSize(FONT_SIZES.table);
+      comp.getRange(5, 1, dataValues.length, 1).setHorizontalAlignment("left");
+      comp.getRange(5, 2, dataValues.length, 2).setNumberFormat("#,##0");
+
+      for (var s = 0; s < sparklineRows.length; s++) {
+        var sr = sparklineRows[s];
+        try {
+          comp.getRange(sr.row, 7).setFormula(
+            '=SPARKLINE({' + sr.v1 + ',' + sr.v2 + '},{"charttype","bar";"color1","#90CAF9";"color2","#1565C0"})'
+          );
+        } catch (e) {
+          comp.getRange(sr.row, 7).setValue("—");
+        }
+      }
+    }
+
+    var summaryStart = 5 + metrics.length + 1;
+    var improved = metrics.filter(function(m) { return m.diff > 0; }).length;
+    var declined = metrics.filter(function(m) { return m.diff < 0; }).length;
+    var unchanged = metrics.filter(function(m) { return m.diff === 0; }).length;
+
+    comp.getRange(summaryStart, 1, 1, numCols).merge()
+      .setValue("📊 SUMMARY").setFontWeight("bold").setFontSize(FONT_SIZES.normal).setBackground("#f1f3f4");
+
+    var summaryData = [
+      ["🟢 Improved:", improved + " metrics", "", "", "", "", ""],
+      ["🔴 Declined:", declined + " metrics", "", "", "", "", ""],
+      ["⚪ Unchanged:", unchanged + " metrics", "", "", "", "", ""]
+    ];
+    var summaryColors = [
+      [STATUS_COLORS.positive.font, STATUS_COLORS.positive.font, "", "", "", "", ""],
+      [STATUS_COLORS.negative.font, STATUS_COLORS.negative.font, "", "", "", "", ""],
+      ["#333", "#333", "", "", "", "", ""]
+    ];
+
+    comp.getRange(summaryStart + 1, 1, 3, numCols).setValues(summaryData).setFontColors(summaryColors).setFontSize(FONT_SIZES.table);
+
+    var sortedByChange = metrics.filter(function(m) { return m.change !== "N/A"; })
+      .sort(function(a, b) { return parseFloat(b.change) - parseFloat(a.change); });
+
+    if (sortedByChange.length > 0) {
+      var bwStart = summaryStart + 5;
+      comp.getRange(bwStart, 1).setValue("🏆 Best:").setFontWeight("bold").setFontSize(FONT_SIZES.table);
+      comp.getRange(bwStart, 2, 1, 3).merge()
+        .setValue(sortedByChange[0].name + " (+" + sortedByChange[0].change + "%)")
+        .setFontColor(STATUS_COLORS.positive.font).setFontWeight("bold").setFontSize(FONT_SIZES.table);
+
+      var worst = sortedByChange[sortedByChange.length - 1];
+      comp.getRange(bwStart + 1, 1).setValue("📉 Worst:").setFontWeight("bold").setFontSize(FONT_SIZES.table);
+      comp.getRange(bwStart + 1, 2, 1, 3).merge()
+        .setValue(worst.name + " (" + worst.change + "%)")
+        .setFontColor(STATUS_COLORS.negative.font).setFontWeight("bold").setFontSize(FONT_SIZES.table);
+    }
+
+    comp.autoResizeColumns(1, numCols);
+    comp.setColumnWidth(7, 200);
+    comp.setFrozenRows(4);
+    ss.setActiveSheet(comp);
+
+  } catch (e) {
+    SpreadsheetApp.getUi().alert("❌ Error: " + e.message);
+  }
+}
+
+
+// ============================================
+// ========= COMPARE ALL PLATFORMS ============
+// ============================================
+
+function runCompareAllPlatforms(month1Str, month2Str) {
+  try {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var raw = ss.getSheetByName("Raw Data");
+    if (!raw) { SpreadsheetApp.getUi().alert("❌ 'Raw Data' sheet not found!"); return; }
+
+    var rawData = raw.getDataRange().getValues();
+    var monthHeaders = getAllMonthHeaders(rawData);
+    var parsed = parseRawData(rawData);
+
+    var m1 = parseCalendarMonth(month1Str);
+    var m2 = parseCalendarMonth(month2Str);
+
+    var col1 = findMonthColumn(monthHeaders, m1.month, m1.year);
+    var col2 = findMonthColumn(monthHeaders, m2.month, m2.year);
+
+    if (col1 === -1 || col2 === -1) {
+      SpreadsheetApp.getUi().alert("❌ Month not found!");
+      return;
+    }
+
+    var month1Label = m1.month + " " + m1.year;
+    var month2Label = m2.month + " " + m2.year;
+
+    var comparison = [];
+    for (var p = 0; p < PLATFORMS.length; p++) {
+      var pMetrics = parsed.allData[PLATFORMS[p]];
+      if (!pMetrics) continue;
+
+      for (var metric in pMetrics) {
+        if (metric.toLowerCase().indexOf("traffic") > -1) {
+          var mRow = pMetrics[metric];
+          var v1 = cleanNum(rawData[mRow][col1]);
+          var v2 = cleanNum(rawData[mRow][col2]);
+          var change = v1 > 0 ? (((v2 - v1) / v1) * 100).toFixed(1) : "N/A";
+          comparison.push({ platform: PLATFORMS[p], t1: v1, t2: v2, diff: v2 - v1, change: change });
+          break;
+        }
+      }
+    }
+
+    comparison.sort(function(a, b) { return b.t2 - a.t2; });
+
+    var comp = ss.getSheetByName("Comparison");
+    if (comp) comp.clear(); else comp = ss.insertSheet("Comparison");
+
+    var numCols = 6;
+
+    comp.getRange(1, 1, 1, numCols).merge()
+      .setValue("📊 ALL PLATFORMS — TRAFFIC COMPARISON")
+      .setFontSize(FONT_SIZES.heading).setFontWeight("bold")
+      .setBackground(PRIMARY_BLUE).setFontColor("white")
+      .setHorizontalAlignment("center");
+
+    comp.getRange(2, 1, 1, numCols).merge()
+      .setValue(month1Label + "  ⟷  " + month2Label)
+      .setFontSize(13).setHorizontalAlignment("center")
+      .setBackground(STATUS_COLORS.info.bg).setFontWeight("bold");
+
+    comp.getRange(4, 1, 1, numCols)
+      .setValues([["Platform", month1Label, month2Label, "Change", "Change %", "Visual"]])
+      .setFontWeight("bold").setFontSize(FONT_SIZES.table)
+      .setBackground(HEADER_BG).setFontColor("white")
+      .setHorizontalAlignment("center");
+
+    var dataValues = [];
+    var dataBgs = [];
+    var dataFontColors = [];
+    var sparklines = [];
+
+    for (var i = 0; i < comparison.length; i++) {
+      var c = comparison[i];
+      var bg = (PLATFORM_COLORS[c.platform] || { light: "#FFF" }).light;
+      var cc = getChangeColor(c.diff);
+      var prefix = getChangePrefix(c.diff);
+
+      dataValues.push([c.platform, c.t1, c.t2, prefix + c.diff, c.change === "N/A" ? "N/A" : c.change + "%", ""]);
+      dataBgs.push([bg, bg, bg, bg, bg, bg]);
+      dataFontColors.push(["#333", "#333", "#333", cc, cc, "#333"]);
+      sparklines.push({ row: 5 + i, v1: c.t1, v2: c.t2 });
+    }
+
+    if (dataValues.length > 0) {
+      var dataRange = comp.getRange(5, 1, dataValues.length, numCols);
+      dataRange.setValues(dataValues);
+      dataRange.setBackgrounds(dataBgs);
+      dataRange.setFontColors(dataFontColors);
+      dataRange.setHorizontalAlignment("center");
+      dataRange.setFontSize(FONT_SIZES.table);
+      comp.getRange(5, 1, dataValues.length, 1).setHorizontalAlignment("left").setFontWeight("bold");
+      comp.getRange(5, 2, dataValues.length, 2).setNumberFormat("#,##0");
+
+      for (var s = 0; s < sparklines.length; s++) {
+        try {
+          comp.getRange(sparklines[s].row, 6).setFormula(
+            '=SPARKLINE({' + sparklines[s].v1 + ',' + sparklines[s].v2 + '},{"charttype","bar";"color1","#90CAF9";"color2","#1565C0"})'
+          );
+        } catch (e) {
+          comp.getRange(sparklines[s].row, 6).setValue("—");
+        }
+      }
+    }
+
+    comp.autoResizeColumns(1, numCols);
+    comp.setColumnWidth(6, 200);
+    comp.setFrozenRows(4);
+    ss.setActiveSheet(comp);
+
+  } catch (e) {
+    SpreadsheetApp.getUi().alert("❌ Error: " + e.message);
+  }
+}
+
+
+// ============================================
+// ========= EMAIL REPORT =====================
+// ============================================
+
+function getOrCreateReportFolder() {
+  var folderName = "Social Media Reports";
+  var folders = DriveApp.getFoldersByName(folderName);
+  if (folders.hasNext()) return folders.next();
+  return DriveApp.createFolder(folderName);
+}
+
+function addSectionSpacing(body) {
+  var spacer = body.appendParagraph("");
+  spacer.setSpacingAfter(8);
+  spacer.setSpacingBefore(4);
+}
+
+function runEmailReport(monthStr, email, recipientName, ccEmail) {
+  try {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var raw = ss.getSheetByName("Raw Data");
+    if (!raw) { SpreadsheetApp.getUi().alert("❌ 'Raw Data' sheet not found!"); return; }
+
+    var rawData = raw.getDataRange().getValues();
+    var monthHeaders = getAllMonthHeaders(rawData);
+    var parsed = parseRawData(rawData);
+
+    var m = parseCalendarMonth(monthStr);
+    var col = findMonthColumn(monthHeaders, m.month, m.year);
+
+    if (col === -1) {
+      SpreadsheetApp.getUi().alert("❌ Month not found: " + m.month + " " + m.year);
+      return;
+    }
+
+    var monthLabel = m.month + " " + m.year;
+    var prevCol = findPrevMonthCol(monthHeaders, col);
+
+    var platformReports = getAllPlatformReports(rawData, parsed, PLATFORMS, col, prevCol);
+
+    var totalTraffic = parsed.totalTrafficRow > -1 ? cleanNum(rawData[parsed.totalTrafficRow][col]) : 0;
+    var prevTraffic = (parsed.totalTrafficRow > -1 && prevCol > -1) ? cleanNum(rawData[parsed.totalTrafficRow][prevCol]) : 0;
+    var totalPosts = parsed.postCountRow > -1 ? cleanNum(rawData[parsed.postCountRow][col]) : 0;
+    var trafficGrowth = prevTraffic > 0 ? (((totalTraffic - prevTraffic) / prevTraffic) * 100).toFixed(1) : "0";
+
+    var totalFollowers = 0;
+    for (var i = 0; i < platformReports.length; i++) {
+      totalFollowers += platformReports[i].followers;
+    }
+
+    // Generate insights early so we can use on page 1
+    var insights = generateInsights(platformReports, totalTraffic, prevTraffic, totalFollowers,
+      monthLabel, rawData, monthHeaders, parsed.allData, col);
+
+    var doc = DocumentApp.create("Social Media Report - " + monthLabel);
+    var body = doc.getBody();
+
+    body.setMarginTop(30);
+    body.setMarginBottom(30);
+    body.setMarginLeft(40);
+    body.setMarginRight(40);
+
+    // ===== PAGE 1: LOGO + KEY METRICS + TRAFFIC + KEY OBSERVATIONS =====
+
+    // Logo + Title
+    try {
+      var logoBlob = DriveApp.getFileById(LOGO_FILE_ID).getAs("image/png");
+      var logoPara = body.appendParagraph("");
+      logoPara.setAlignment(DocumentApp.HorizontalAlignment.CENTER);
+      logoPara.setSpacingAfter(1);
+      logoPara.setSpacingBefore(0);
+      var logo = logoPara.addInlineImage(logoBlob);
+      var logoWidth = 90;
+      var scaleVal = logoWidth / logo.getWidth();
+      logo.setWidth(logoWidth);
+      logo.setHeight(logo.getHeight() * scaleVal);
+      logoPara.appendText("  SOCIAL MEDIA REPORT").setBold(true).setFontSize(16).setForegroundColor(PRIMARY_BLUE);
+    } catch (e) {
+      var title = body.appendParagraph("📊 CLARITI SOCIAL MEDIA REPORT");
+      title.setAlignment(DocumentApp.HorizontalAlignment.CENTER);
+      title.setAttributes({ FONT_SIZE: 16, BOLD: true, FOREGROUND_COLOR: PRIMARY_BLUE });
+      title.setSpacingAfter(1);
+    }
+
+    var subtitle = body.appendParagraph(monthLabel);
+    subtitle.setAlignment(DocumentApp.HorizontalAlignment.CENTER);
+    subtitle.setAttributes({ FONT_SIZE: 11, FOREGROUND_COLOR: "#666666", BOLD: true });
+    subtitle.setSpacingAfter(2);
+    subtitle.setSpacingBefore(0);
+
+    // Summary line
+    var summaryText = "";
+    if (parseFloat(trafficGrowth) > 0) {
+      summaryText = "🚀 Great news: Traffic increased by " + trafficGrowth + "% this month!";
+    } else if (parseFloat(trafficGrowth) < 0) {
+      summaryText = "📉 Traffic saw a " + trafficGrowth + "% change this month.";
+    } else {
+      summaryText = "Traffic remained stable this month.";
+    }
+
+    var summaryPara = body.appendParagraph(summaryText);
+    summaryPara.setAlignment(DocumentApp.HorizontalAlignment.CENTER);
+    summaryPara.setAttributes({ FONT_SIZE: 9, ITALIC: true, FOREGROUND_COLOR: "#333333" });
+    summaryPara.setSpacingAfter(4);
+    summaryPara.setSpacingBefore(1);
+
+    // KEY METRICS
+    var metricsHeader = body.appendParagraph("📊 KEY METRICS");
+    metricsHeader.setAttributes({ FONT_SIZE: 11, BOLD: true, FOREGROUND_COLOR: PRIMARY_BLUE });
+    metricsHeader.setSpacingAfter(1);
+    metricsHeader.setSpacingBefore(2);
+
+    var metricsTable = body.appendTable([
+      ["Metric", "Value", "vs Last Month"],
+      ["🌐 Total Traffic", formatNumber(totalTraffic), trafficGrowth + "%"],
+      ["👥 Total Followers", formatNumber(totalFollowers), ""],
+      ["📝 Total Posts", totalPosts.toString(), ""]
+    ]);
+    styleDocTableCompact(metricsTable, PRIMARY_BLUE);
+
+    // Tiny spacer
+    var sp1 = body.appendParagraph("");
+    sp1.setSpacingAfter(2);
+    sp1.setSpacingBefore(1);
+
+    // TRAFFIC BY PLATFORM
+    var trafficHeader = body.appendParagraph("📈 TRAFFIC BY PLATFORM");
+    trafficHeader.setAttributes({ FONT_SIZE: 11, BOLD: true, FOREGROUND_COLOR: PRIMARY_BLUE });
+    trafficHeader.setSpacingAfter(1);
+    trafficHeader.setSpacingBefore(1);
+
+    var trafficRows = [["Platform", "Traffic", "Share %", "MoM", "Status"]];
+
+    for (var i = 0; i < platformReports.length; i++) {
+      var p = platformReports[i];
+      var share = totalTraffic > 0 ? ((p.traffic / totalTraffic) * 100).toFixed(1) + "%" : "0%";
+      var changeStr = p.trafficChange !== "N/A"
+        ? (parseFloat(p.trafficChange) >= 0 ? "+" : "") + p.trafficChange + "%"
+        : "-";
+      var status = getStatusText(p.trafficChange);
+      trafficRows.push([p.name, formatNumber(p.traffic), share, changeStr, status]);
+    }
+    trafficRows.push(["TOTAL", formatNumber(totalTraffic), "100%", trafficGrowth + "%", ""]);
+
+    var trafficTable = body.appendTable(trafficRows);
+    styleDocTableCompact(trafficTable, "#34a853");
+    boldLastRow(trafficTable, "#E8F5E9");
+
+    // Tiny spacer
+    var sp2 = body.appendParagraph("");
+    sp2.setSpacingAfter(2);
+    sp2.setSpacingBefore(1);
+
+    // KEY OBSERVATIONS — on page 1
+    var insightHeader = body.appendParagraph("🎯 KEY OBSERVATIONS");
+    insightHeader.setAttributes({ FONT_SIZE: 11, BOLD: true, FOREGROUND_COLOR: "#FF6D00" });
+    insightHeader.setSpacingAfter(2);
+    insightHeader.setSpacingBefore(1);
+
+    for (var i = 0; i < insights.length; i++) {
+      var insightPara = body.appendListItem(insights[i]);
+      insightPara.setGlyphType(DocumentApp.GlyphType.BULLET);
+      insightPara.setAttributes({ FONT_SIZE: 8 });
+      insightPara.setSpacingAfter(1);
+      insightPara.setSpacingBefore(0);
+    }
+
+    // ===== PAGE 2+: DETAILED METRICS =====
+    body.appendPageBreak();
+
+    var detailHeader = body.appendParagraph("📋 DETAILED METRICS");
+    detailHeader.setAttributes({ FONT_SIZE: 12, BOLD: true, FOREGROUND_COLOR: PRIMARY_BLUE });
+    detailHeader.setSpacingAfter(3);
+    detailHeader.setSpacingBefore(2);
+
+    var rowsOnPage = 2;
+    var maxRowsPerPage = 30;
+
+    for (var i = 0; i < platformReports.length; i++) {
+      var p = platformReports[i];
+      var pColor = (PLATFORM_COLORS[p.name] || { dark: "#333333" }).dark;
+      var metricCount = Object.keys(p.details).length;
+      var tableRows = metricCount + 1;
+
+      if (i > 0 && (rowsOnPage + tableRows + 2) > maxRowsPerPage) {
+        body.appendPageBreak();
+        rowsOnPage = 0;
+      } else if (i > 0) {
+        var spacer = body.appendParagraph("");
+        spacer.setSpacingAfter(2);
+        spacer.setSpacingBefore(1);
+        rowsOnPage += 1;
+      }
+
+      var pHeader = body.appendParagraph(p.name);
+      pHeader.setAttributes({ FONT_SIZE: 10, BOLD: true, FOREGROUND_COLOR: pColor });
+      pHeader.setSpacingAfter(1);
+      pHeader.setSpacingBefore(1);
+      rowsOnPage += 1;
+
+      var detailRows = [["Metric", monthLabel, "Previous", "Change", "Change %"]];
+
+      for (var metric in p.details) {
+        var d = p.details[metric];
+        var diff = d.current - d.previous;
+        var diffStr = diff >= 0 ? "+" + formatNumber(diff) : formatNumber(diff);
+
+        var changePct;
+        if (d.previous > 0) {
+          var pctVal = ((diff / d.previous) * 100).toFixed(1);
+          changePct = parseFloat(pctVal) >= 0 ? "+" + pctVal + "%" : pctVal + "%";
+        } else {
+          changePct = "-";
+        }
+
+        detailRows.push([
+          metric,
+          formatNumber(d.current),
+          d.previous > 0 ? formatNumber(d.previous) : "-",
+          d.previous > 0 ? diffStr : "-",
+          changePct
+        ]);
+      }
+
+      var detailTable = body.appendTable(detailRows);
+      styleDocTableCompact(detailTable, pColor);
+      rowsOnPage += tableRows;
+    }
+
+
+    // ===== FOOTER — right after last table =====
+    
+      var line = body.appendParagraph("─────────────────────────────────────────────────");
+      line.setAttributes({ FONT_SIZE: 7, FOREGROUND_COLOR: "#cccccc" });
+      line.setSpacingAfter(0);
+      line.setSpacingBefore(2);
+
+      var footer = body.appendParagraph("📊 Full Dashboard: " + ss.getUrl());
+      footer.setAttributes({ FONT_SIZE: 7, FOREGROUND_COLOR: "#666666" });
+      footer.setSpacingAfter(0);
+      footer.setSpacingBefore(0);
+
+      var generated = body.appendParagraph("Generated on " + new Date().toLocaleString());
+      generated.setAttributes({ FONT_SIZE: 7, FOREGROUND_COLOR: "#999999" });
+      generated.setSpacingAfter(0);
+      generated.setSpacingBefore(0);
+
+    // ===== SAVE AND CONVERT TO PDF =====
+    doc.saveAndClose();
+
+    var docFile = DriveApp.getFileById(doc.getId());
+    var pdfBlob = docFile.getAs("application/pdf");
+    pdfBlob.setName("Social_Media_Report_" + m.month + "_" + m.year + ".pdf");
+
+    var reportFolder = getOrCreateReportFolder();
+    reportFolder.createFile(pdfBlob);
+
+    var emailBody = "Hi " + recipientName + ",\n\n" +
+      "Please find attached the Clariti's social media report for " + monthLabel + ".\n\n" +
+      "It covers key metrics, growth highlights, and engagement performance across platforms.\n" +
+      "Please let me know if you'd like a quick walkthrough or deeper insights on any section.\n\n" +
+      "Thanks,\n" +
+      "Addison\n" +
+      "clariti.app";
+
+    var emailOptions = {
+      to: email,
+      subject: "📊 Clariti Social Media Report: " + monthLabel,
+      body: emailBody,
+      attachments: [pdfBlob]
+    };
+
+    if (ccEmail && ccEmail.trim() !== "") {
+      emailOptions.cc = ccEmail.trim();
+    }
+
+    MailApp.sendEmail(emailOptions);
+    docFile.setTrashed(true);
+
+  } catch (e) {
+    SpreadsheetApp.getUi().alert("❌ Error generating report: " + e.message);
+  }
+}
+
+function boldLastRow(table, bgColor) {
+  var lastRowIndex = table.getNumRows() - 1;
+  var lastRow = table.getRow(lastRowIndex);
+  for (var c = 0; c < lastRow.getNumCells(); c++) {
+    lastRow.getCell(c).getChild(0).asParagraph().setBold(true);
+    lastRow.getCell(c).setBackgroundColor(bgColor);
+  }
+}
+
+function styleDocTableCompact(table, headerColor) {
+  var headerRow = table.getRow(0);
+  var numCols = headerRow.getNumCells();
+
+  for (var c = 0; c < numCols; c++) {
+    headerRow.getCell(c).setBackgroundColor(headerColor);
+    headerRow.getCell(c).setPaddingTop(2);
+    headerRow.getCell(c).setPaddingBottom(2);
+    headerRow.getCell(c).setPaddingLeft(4);
+    headerRow.getCell(c).setPaddingRight(4);
+    var headerText = headerRow.getCell(c).getChild(0).asParagraph();
+    headerText.setBold(true);
+    headerText.setForegroundColor("#FFFFFF");
+    headerText.setFontSize(9);
+    headerText.setSpacingAfter(0);
+    headerText.setSpacingBefore(0);
+  }
+
+  for (var r = 1; r < table.getNumRows(); r++) {
+    var row = table.getRow(r);
+    var bgColor = r % 2 === 0 ? "#F5F5F5" : "#FFFFFF";
+
+    for (var c = 0; c < row.getNumCells(); c++) {
+      row.getCell(c).setBackgroundColor(bgColor);
+      row.getCell(c).setPaddingTop(1);
+      row.getCell(c).setPaddingBottom(1);
+      row.getCell(c).setPaddingLeft(4);
+      row.getCell(c).setPaddingRight(4);
+      var cellText = row.getCell(c).getChild(0).asParagraph();
+      cellText.setFontSize(9);
+      cellText.setSpacingAfter(0);
+      cellText.setSpacingBefore(0);
+      if (c === 0) cellText.setBold(true);
+    }
+  }
+
+  var firstColWidth = 130;
+  var remaining = Math.floor((480 - firstColWidth) / Math.max(numCols - 1, 1));
+
+  for (var r = 0; r < table.getNumRows(); r++) {
+    table.getRow(r).getCell(0).setWidth(firstColWidth);
+    for (var c = 1; c < table.getRow(r).getNumCells(); c++) {
+      table.getRow(r).getCell(c).setWidth(remaining);
+    }
+  }
+}
+
+// ============================================
+// ========= GENERATE INSIGHTS ================
+// ============================================
+
+function generateInsights(platformReport, totalTraffic, prevTraffic, totalFollowers, monthLabel, rawData, monthHeaders, allData, currentCol) {
+  var insights = [];
+
+  // 1. Best traffic driver
+  if (platformReport.length > 0 && totalTraffic > 0) {
+    var best = platformReport[0];
+    var bestShare = ((best.traffic / totalTraffic) * 100).toFixed(1);
+    insights.push("🏆 " + best.name + " is the #1 traffic driver with " +
+      formatNumber(best.traffic) + " visits (" + bestShare + "% of total traffic)");
+  }
+
+  // 2. Total traffic trend
+  if (prevTraffic > 0) {
+    var change = ((totalTraffic - prevTraffic) / prevTraffic * 100).toFixed(1);
+    var changeVal = parseFloat(change);
+
+    if (changeVal > 20) {
+      insights.push("🚀 Total traffic surged by " + change + "% (" + formatNumber(prevTraffic) + " → " + formatNumber(totalTraffic) + ") — investigate what worked!");
+    } else if (changeVal > 0) {
+      insights.push("📈 Total traffic grew by " + change + "% (" + formatNumber(prevTraffic) + " → " + formatNumber(totalTraffic) + ")");
+    } else if (changeVal === 0) {
+      insights.push("⚪ Total traffic remained flat at " + formatNumber(totalTraffic));
+    } else if (changeVal > -10) {
+      insights.push("⚠️ Total traffic declined slightly by " + change + "% (" + formatNumber(prevTraffic) + " → " + formatNumber(totalTraffic) + ") — monitor next month");
+    } else if (changeVal > -25) {
+      insights.push("📉 Total traffic dropped by " + change + "% (" + formatNumber(prevTraffic) + " → " + formatNumber(totalTraffic) + ") — needs attention!");
+    } else {
+      insights.push("🔴 CRITICAL: Total traffic crashed by " + change + "% (" + formatNumber(prevTraffic) + " → " + formatNumber(totalTraffic) + ") — immediate review required!");
+    }
+  }
+
+  // 3. Dead platforms
+  var deadPlatforms = platformReport.filter(function(p) { return p.traffic === 0; });
+  if (deadPlatforms.length > 0) {
+    var deadNames = deadPlatforms.map(function(p) { return p.name; }).join(", ");
+    insights.push("📉 " + deadNames + " generated ZERO traffic — consider reviewing strategy or dropping");
+  }
+
+  // 4. Best growth platform
+  var growthPlatforms = platformReport.filter(function(p) {
+    return p.trafficChange !== "N/A" && parseFloat(p.trafficChange) > 0;
+  }).sort(function(a, b) { return parseFloat(b.trafficChange) - parseFloat(a.trafficChange); });
+
+  if (growthPlatforms.length > 0) {
+    var top = growthPlatforms[0];
+    insights.push("🚀 " + top.name + " showed the strongest growth at +" + top.trafficChange + "% traffic increase");
+  }
+
+  // 5. Worst decline with severity
+  var declinePlatforms = platformReport.filter(function(p) {
+    return p.trafficChange !== "N/A" && parseFloat(p.trafficChange) < 0;
+  }).sort(function(a, b) { return parseFloat(a.trafficChange) - parseFloat(b.trafficChange); });
+
+  if (declinePlatforms.length > 0) {
+    var worst = declinePlatforms[0];
+    var worstVal = parseFloat(worst.trafficChange);
+
+    if (worstVal < -50) {
+      insights.push("🔴 CRITICAL: " + worst.name + " traffic collapsed by " + worst.trafficChange + "% — check for platform issues, algorithm changes, or broken links");
+    } else if (worstVal < -25) {
+      insights.push("🔴 " + worst.name + " traffic dropped sharply by " + worst.trafficChange + "% — review content strategy and posting frequency");
+    } else if (worstVal < -10) {
+      insights.push("⚠️ " + worst.name + " traffic declined by " + worst.trafficChange + "% — needs investigation");
+    } else {
+      insights.push("⚠️ " + worst.name + " traffic dipped slightly by " + worst.trafficChange + "% — keep monitoring");
+    }
+
+    if (declinePlatforms.length > 1) {
+      var declNames = declinePlatforms.map(function(p) { return p.name + " (" + p.trafficChange + "%)"; }).join(", ");
+      insights.push("📉 Multiple platforms declining: " + declNames);
+    }
+  }
+
+  // 6. Traffic drop diagnosis
+  if (prevTraffic > 0 && totalTraffic < prevTraffic) {
+    var totalDrop = prevTraffic - totalTraffic;
+
+    var dropContributors = platformReport.filter(function(p) {
+      return p.trafficChange !== "N/A" && parseFloat(p.trafficChange) < 0;
+    }).map(function(p) {
+      return { name: p.name, drop: p.prevTraffic - p.traffic, pct: totalDrop > 0 ? ((p.prevTraffic - p.traffic) / totalDrop * 100).toFixed(1) : "0" };
+    }).sort(function(a, b) { return b.drop - a.drop; });
+
+    if (dropContributors.length > 0 && dropContributors[0].drop > 0) {
+      var topDropper = dropContributors[0];
+      insights.push("🔍 " + topDropper.name + " accounts for " + topDropper.pct + "% of total traffic loss (" + formatNumber(topDropper.drop) + " visits lost) — prioritize fixing this platform");
+    }
+
+    var droppingCount = declinePlatforms ? declinePlatforms.length : 0;
+    var totalPlatformsActive = platformReport.filter(function(p) { return p.traffic > 0 || p.prevTraffic > 0; }).length;
+
+    if (droppingCount === totalPlatformsActive && totalPlatformsActive > 1) {
+      insights.push("🔴 ALL platforms are declining — this may indicate a broader issue (website problems, seasonality, or reduced posting)");
+    } else if (droppingCount > totalPlatformsActive / 2) {
+      insights.push("⚠️ Majority of platforms declining (" + droppingCount + "/" + totalPlatformsActive + ") — review overall content strategy");
+    }
+  }
+
+  // 7. Consecutive decline detection
+  var consecutiveDrops = countConsecutiveTrafficDrops(rawData, monthHeaders, currentCol);
+  if (consecutiveDrops >= 3) {
+    insights.push("🔴 ALERT: Traffic has been declining for " + consecutiveDrops + " consecutive months — urgent strategy review needed!");
+  } else if (consecutiveDrops === 2) {
+    insights.push("⚠️ Traffic has dropped for 2 months in a row — watch closely next month");
+  }
+
+  // 8. Follower milestones
+  for (var i = 0; i < platformReport.length; i++) {
+    var p = platformReport[i];
+    if (p.followers >= 1000 && p.followers % 500 < 50) {
+      insights.push("🎉 " + p.name + " approaching " + formatNumber(Math.ceil(p.followers / 500) * 500) + " followers milestone!");
+    }
+  }
+
+  // 9. Viral content detection
+  for (var pName in allData) {
+    var pMetrics = allData[pName];
+    for (var metric in pMetrics) {
+      var ml = metric.toLowerCase();
+      if (ml.indexOf("views") > -1 || ml.indexOf("impression") > -1) {
+        var mRow = pMetrics[metric];
+        var currentVal = cleanNum(rawData[mRow][currentCol]);
+
+        var prevVals = [];
+        for (var h = 0; h < monthHeaders.length; h++) {
+          if (monthHeaders[h].col < currentCol) {
+            prevVals.push(cleanNum(rawData[mRow][monthHeaders[h].col]));
+          }
+        }
+
+        if (prevVals.length >= 3) {
+          var lastThree = prevVals.slice(-3);
+          var avg = lastThree.reduce(function(a, b) { return a + b; }, 0) / 3;
+
+          if (avg > 0 && currentVal > avg * 3) {
+            insights.push("🚀 " + pName + " " + metric + " spiked to " + formatNumber(currentVal) +
+              " (3-month avg: " + formatNumber(Math.round(avg)) + ") — likely viral content!");
+          }
+        }
+      }
+    }
+  }
+
+  // 10. Consistent follower trends
+  for (var pName in allData) {
+    var pMetrics = allData[pName];
+    for (var metric in pMetrics) {
+      var ml = metric.toLowerCase();
+      if (ml.indexOf("followers") > -1 || ml.indexOf("subscribers") > -1) {
+        var mRow = pMetrics[metric];
+        var vals = [];
+        var startIdx = Math.max(0, monthHeaders.length - 6);
+        for (var h = startIdx; h < monthHeaders.length; h++) {
+          if (monthHeaders[h].col <= currentCol) {
+            vals.push(cleanNum(rawData[mRow][monthHeaders[h].col]));
+          }
+        }
+
+        if (vals.length >= 4) {
+          var allGrowing = true;
+          var allDeclining = true;
+          for (var v = 1; v < vals.length; v++) {
+            if (vals[v] <= vals[v - 1]) allGrowing = false;
+            if (vals[v] >= vals[v - 1]) allDeclining = false;
+          }
+
+          if (allGrowing) {
+            var growth = vals[0] > 0 ? (((vals[vals.length - 1] - vals[0]) / vals[0]) * 100).toFixed(1) : "N/A";
+            insights.push("📈 " + pName + " followers growing steadily: " + formatNumber(vals[0]) + " → " + formatNumber(vals[vals.length - 1]) + " (+" + growth + "% over " + vals.length + " months)");
+          }
+          if (allDeclining) {
+            insights.push("📉 " + pName + " followers declining consistently over " + vals.length + " months — review content strategy");
+          }
+        }
+      }
+    }
+  }
+
+  // 11. Engagement drop vs traffic drop
+  for (var i = 0; i < platformReport.length; i++) {
+    var p = platformReport[i];
+    if (p.trafficChange !== "N/A" && parseFloat(p.trafficChange) < -15) {
+      var engagementDropped = false;
+      var engagementGrew = false;
+
+      for (var metric in p.details) {
+        var ml = metric.toLowerCase();
+        if (ml.indexOf("reaction") > -1 || ml.indexOf("engagement") > -1 || ml.indexOf("like") > -1 || ml.indexOf("comment") > -1) {
+          var d = p.details[metric];
+          if (d.previous > 0) {
+            var engChange = ((d.current - d.previous) / d.previous * 100);
+            if (engChange < -10) engagementDropped = true;
+            if (engChange > 10) engagementGrew = true;
+          }
+        }
+      }
+
+      if (engagementDropped) {
+        insights.push("📉 " + p.name + ": Both traffic AND engagement dropped — content may not be resonating with audience");
+      } else if (engagementGrew) {
+        insights.push("🤔 " + p.name + ": Traffic dropped but engagement grew — content is good but reach/distribution may be limited");
+      }
+    }
+  }
+
+  if (insights.length === 0) {
+    insights.push("✅ All platforms performing within normal range this month.");
+  }
+
+  return insights;
+}
+
+function countConsecutiveTrafficDrops(rawData, monthHeaders, currentCol) {
+  var totalTrafficRow = -1;
+  for (var row = 0; row < rawData.length; row++) {
+    var label = rawData[row][0] ? rawData[row][0].toString().trim() : "";
+    if (label === "Total number of traffics") { totalTrafficRow = row; break; }
+  }
+
+  if (totalTrafficRow === -1) return 0;
+
+  var currentIdx = -1;
+  for (var i = 0; i < monthHeaders.length; i++) {
+    if (monthHeaders[i].col === currentCol) { currentIdx = i; break; }
+  }
+
+  if (currentIdx < 1) return 0;
+
+  var consecutiveDrops = 0;
+
+  for (var i = currentIdx; i > 0; i--) {
+    var currentVal = cleanNum(rawData[totalTrafficRow][monthHeaders[i].col]);
+    var prevVal = cleanNum(rawData[totalTrafficRow][monthHeaders[i - 1].col]);
+
+    if (prevVal > 0 && currentVal < prevVal) {
+      consecutiveDrops++;
+    } else {
+      break;
+    }
+  }
+
+  return consecutiveDrops;
+}
+
+
+// ============================================
+// ========= DASHBOARD ========================
+// ============================================
+
+function buildDashboard() {
+  try {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var dash = ss.getSheetByName("Dashboard");
+    if (!dash) dash = ss.insertSheet("Dashboard");
+    dash.clear();
+
+    var numCols = 10;
+
+    dash.getRange(1, 1, 1, numCols).merge()
+      .setValue("📊 CLARITI SOCIAL MEDIA DASHBOARD")
+      .setFontSize(18).setFontWeight("bold")
+      .setBackground(PRIMARY_BLUE).setFontColor("white")
+      .setHorizontalAlignment("center");
+
+    dash.getRange(2, 1, 1, numCols).merge()
+      .setValue("Select filters → Menu: 📊 Social Media → 🔄 Refresh Dashboard")
+      .setFontSize(10).setFontColor("#666").setHorizontalAlignment("center")
+      .setBackground(STATUS_COLORS.info.bg);
+
+    dash.getRange("A4").setValue("🏢 Platform:").setFontWeight("bold").setFontSize(FONT_SIZES.table);
+    dash.getRange("B4").setValue("All").setDataValidation(
+      SpreadsheetApp.newDataValidation()
+        .requireValueInList(["All"].concat(PLATFORMS))
+        .setAllowInvalid(false).build()
+    ).setBackground("#FFF9C4").setFontWeight("bold");
+
+    dash.getRange("C4").setValue("📅 Month:").setFontWeight("bold").setFontSize(FONT_SIZES.table);
+    dash.getRange("D4").setValue("All").setDataValidation(
+      SpreadsheetApp.newDataValidation()
+        .requireValueInList(["All", "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"])
+        .setAllowInvalid(false).build()
+    ).setBackground("#FFF9C4").setFontWeight("bold");
+
+    dash.getRange("E4").setValue("📆 Year:").setFontWeight("bold").setFontSize(FONT_SIZES.table);
+    dash.getRange("F4").setValue("All").setDataValidation(
+      SpreadsheetApp.newDataValidation()
+        .requireValueInList(getYearList())
+        .setAllowInvalid(false).build()
+    ).setBackground("#FFF9C4").setFontWeight("bold");
+
+    
+
+    applyDashboardColumnWidths(dash);
+    dash.setFrozenRows(4);
+
+    SpreadsheetApp.getUi().alert("✅ Dashboard created!\nUse: 📊 Social Media → 🔄 Refresh Dashboard");
+
+  } catch (e) {
+    SpreadsheetApp.getUi().alert("❌ Error: " + e.message);
+  }
+}
+
+function refreshDashboard() {
+  try {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var raw = ss.getSheetByName("Raw Data");
+    var dash = ss.getSheetByName("Dashboard");
+
+    if (!raw || !dash) { SpreadsheetApp.getUi().alert("❌ Missing sheets!"); return; }
+
+    var selectedPlatform = dash.getRange("B4").getValue().toString().trim();
+    var selectedMonth = dash.getRange("D4").getValue().toString().trim();
+    var selectedYear = dash.getRange("F4").getValue().toString().trim();
+
+    var rawData = raw.getDataRange().getValues();
+    var monthHeaders = getAllMonthHeaders(rawData);
+    var parsed = parseRawData(rawData);
+
+    var filteredMonths = monthHeaders.filter(function(mh) {
+      return (selectedMonth === "All" || mh.month === selectedMonth) &&
+             (selectedYear === "All" || mh.year === parseInt(selectedYear));
+    });
+
+    if (filteredMonths.length === 0) {
+      clearDashboardContent(dash);
+      dash.getRange(6, 1, 1, 10).merge()
+        .setValue("❌ No data for selected filters")
+        .setFontSize(14).setHorizontalAlignment("center").setFontColor("red");
+      return;
+    }
+
+    var platforms = (selectedPlatform === "All")
+      ? Object.keys(parsed.allData)
+      : (parsed.allData[selectedPlatform] ? [selectedPlatform] : []);
+
+    var lastMonthCol = filteredMonths[filteredMonths.length - 1].col;
+    var prevMonthCol = findPrevMonthCol(monthHeaders, lastMonthCol);
+
+    clearDashboardContent(dash);
+
+    var row = 6;
+
+    var row = 6;
+
+    // ===== SECTION 1: KPI CARDS =====
+    row = renderKPISection(dash, raw, rawData, parsed, platforms, filteredMonths, lastMonthCol, prevMonthCol, selectedPlatform, selectedMonth, selectedYear, row);
+
+    // ===== SECTION 2: TRAFFIC TABLE =====
+    row = renderTrafficSection(dash, rawData, parsed, platforms, filteredMonths, lastMonthCol, prevMonthCol, row);
+
+    // ===== SECTION 3: CHARTS =====
+    row = renderCharts(dash, rawData, parsed, platforms, filteredMonths, lastMonthCol, prevMonthCol, row);
+
+    // ===== SECTION 3: MONTHLY SUMMARY + DETAILED METRICS =====
+    row = renderMonthlySummary(dash, rawData, parsed, platforms, filteredMonths, monthHeaders, lastMonthCol, prevMonthCol, row);
+
+    // ===== SECTION 4: KEY OBSERVATIONS =====
+    row = renderInsightsSection(dash, rawData, parsed, platforms, filteredMonths, monthHeaders, lastMonthCol, prevMonthCol, row);
+
+    // ===== FOOTER =====
+    row += 1;
+    dash.getRange(row, 1, 1, 10).merge()
+      .setValue("📊 Dashboard: " + ss.getUrl() + "  |  Generated: " + new Date().toLocaleString())
+      .setFontSize(8).setFontColor("#999999").setHorizontalAlignment("center");
+
+    // ===== LOGO ON DASHBOARD =====
+    try {
+            var logoBlob = DriveApp.getFileById(LOGO_FILE_ID).getAs("image/png");
+      var existingImages = dash.getImages();
+      for (var i = 0; i < existingImages.length; i++) {
+        existingImages[i].remove();
+      }
+      var img = dash.insertImage(logoBlob, 1, 1);
+      img.setWidth(120);
+      img.setHeight(40);
+    } catch (e) {
+      // Skip if logo fails
+    }
+
+    applyDashboardColumnWidths(dash);
+    SpreadsheetApp.getUi().alert("✅ Dashboard refreshed!");
+
+  } catch (e) {
+    SpreadsheetApp.getUi().alert("❌ Error refreshing: " + e.message);
+  }
+}
+
+
+// ============================================
+// ========= DASHBOARD RENDER FUNCTIONS =======
+// ============================================
+
+function renderKPISection(dash, raw, rawData, parsed, platforms, filteredMonths, lastMonthCol, prevMonthCol, selectedPlatform, selectedMonth, selectedYear, startRow) {
+  var numCols = 10;
+  var row = startRow;
+
+  dash.getRange(row, 1, 1, numCols).merge()
+    .setValue("📊 KEY METRICS — " + selectedPlatform + " | " + selectedMonth + " | " + selectedYear)
+    .setFontSize(13).setFontWeight("bold").setBackground(PRIMARY_BLUE).setFontColor("white")
+    .setHorizontalAlignment("center");
+  row++;
+
+  // Calculate KPIs
+  var totalTraffic = 0, totalFollowers = 0, totalPosts = 0, totalImpressions = 0;
+
+  if (parsed.postCountRow > -1) {
+    for (var m = 0; m < filteredMonths.length; m++) {
+      totalPosts += cleanNum(rawData[parsed.postCountRow][filteredMonths[m].col]);
+    }
+  }
+
+  if (parsed.totalTrafficRow > -1 && selectedPlatform === "All") {
+    for (var m = 0; m < filteredMonths.length; m++) {
+      totalTraffic += cleanNum(rawData[parsed.totalTrafficRow][filteredMonths[m].col]);
+    }
+  }
+
+  for (var p = 0; p < platforms.length; p++) {
+    var pMetrics = parsed.allData[platforms[p]];
+    for (var metric in pMetrics) {
+      var mRow = pMetrics[metric];
+      var ml = metric.toLowerCase();
+      for (var m = 0; m < filteredMonths.length; m++) {
+        var val = cleanNum(rawData[mRow][filteredMonths[m].col]);
+        if (ml.indexOf("traffic") > -1 && selectedPlatform !== "All") totalTraffic += val;
+        if ((ml.indexOf("followers") > -1 || ml.indexOf("subscribers") > -1) && m === filteredMonths.length - 1) totalFollowers += val;
+        if (ml.indexOf("impression") > -1) totalImpressions += val;
+      }
+    }
+  }
+
+  var latestTraffic = parsed.totalTrafficRow > -1 ? cleanNum(rawData[parsed.totalTrafficRow][lastMonthCol]) : 0;
+  var prevTraffic = (parsed.totalTrafficRow > -1 && prevMonthCol > -1) ? cleanNum(rawData[parsed.totalTrafficRow][prevMonthCol]) : 0;
+  var tGrowth = prevTraffic > 0 ? (((latestTraffic - prevTraffic) / prevTraffic) * 100).toFixed(1) : "0";
+
+  // KPI Labels
+  var kpiLabels = ["🌐 Traffic", "👥 Followers", "📝 Posts", "👁️ Impressions", "📈 MoM"];
+
+  for (var k = 0; k < kpiLabels.length; k++) {
+    var colStart = 1 + (k * 2);
+    dash.getRange(row, colStart, 1, 2).merge()
+      .setValue(kpiLabels[k])
+      .setFontWeight("bold").setFontSize(9)
+      .setBackground("#f1f3f4").setHorizontalAlignment("center");
+  }
+  row++;
+
+  // KPI Values
+  var kpiData = [
+    { value: totalTraffic, format: "#,##0", bg: STATUS_COLORS.positive.bg, color: STATUS_COLORS.positive.font },
+    { value: totalFollowers, format: "#,##0", bg: STATUS_COLORS.info.bg, color: STATUS_COLORS.info.font },
+    { value: totalPosts, format: "#,##0", bg: STATUS_COLORS.neutral.bg, color: STATUS_COLORS.neutral.font },
+    { value: totalImpressions, format: "#,##0", bg: "#F3E5F5", color: "#7B1FA2" },
+    { value: tGrowth + "%", format: "@", bg: parseFloat(tGrowth) >= 0 ? STATUS_COLORS.positive.bg : STATUS_COLORS.negative.bg, color: parseFloat(tGrowth) >= 0 ? STATUS_COLORS.positive.font : STATUS_COLORS.negative.font }
+  ];
+
+  for (var k = 0; k < kpiData.length; k++) {
+    var colStart = 1 + (k * 2);
+    var cell = dash.getRange(row, colStart, 1, 2).merge();
+    cell.setValue(kpiData[k].value)
+      .setFontSize(18).setFontWeight("bold")
+      .setHorizontalAlignment("center")
+      .setBackground(kpiData[k].bg)
+      .setFontColor(kpiData[k].color);
+    if (kpiData[k].format === "#,##0" && typeof kpiData[k].value === "number") {
+      cell.setNumberFormat("#,##0");
+    }
+  }
+
+  row += 2;
+  return row;
+}
+
+function renderTrafficSection(dash, rawData, parsed, platforms, filteredMonths, lastMonthCol, prevMonthCol, startRow) {
+  var numCols = 10;
+  var row = startRow;
+
+  dash.getRange(row, 1, 1, numCols).merge()
+    .setValue("📈 TRAFFIC BY PLATFORM")
+    .setFontSize(FONT_SIZES.normal).setFontWeight("bold")
+    .setBackground("#34a853").setFontColor("white").setHorizontalAlignment("center");
+  row++;
+
+  // Headers: Platform | Traffic | Share % | MoM Change | Status | Trend
+  dash.getRange(row, 1, 1, 2).merge().setValue("Platform").setFontWeight("bold").setBackground(HEADER_BG).setFontColor("white").setHorizontalAlignment("center").setFontSize(FONT_SIZES.table);
+  dash.getRange(row, 3, 1, 2).merge().setValue("Traffic").setFontWeight("bold").setBackground(HEADER_BG).setFontColor("white").setHorizontalAlignment("center").setFontSize(FONT_SIZES.table);
+  dash.getRange(row, 5).setValue("Share %").setFontWeight("bold").setBackground(HEADER_BG).setFontColor("white").setHorizontalAlignment("center").setFontSize(FONT_SIZES.table);
+  dash.getRange(row, 6).setValue("MoM").setFontWeight("bold").setBackground(HEADER_BG).setFontColor("white").setHorizontalAlignment("center").setFontSize(FONT_SIZES.table);
+  dash.getRange(row, 7, 1, 2).merge().setValue("Status").setFontWeight("bold").setBackground(HEADER_BG).setFontColor("white").setHorizontalAlignment("center").setFontSize(FONT_SIZES.table);
+  dash.getRange(row, 9, 1, 2).merge().setValue("Trend").setFontWeight("bold").setBackground(HEADER_BG).setFontColor("white").setHorizontalAlignment("center").setFontSize(FONT_SIZES.table);
+  row++;
+
+  var trafficData = [];
+  var grandTotal = 0;
+
+  for (var p = 0; p < platforms.length; p++) {
+    var pName = platforms[p];
+    var pMetrics = parsed.allData[pName];
+    var pTraffic = 0, pPrevTraffic = 0;
+    var pTrend = [];
+
+    for (var metric in pMetrics) {
+      if (metric.toLowerCase().indexOf("traffic") > -1) {
+        pTraffic = cleanNum(rawData[pMetrics[metric]][lastMonthCol]);
+        pPrevTraffic = prevMonthCol > -1 ? cleanNum(rawData[pMetrics[metric]][prevMonthCol]) : 0;
+        for (var fm = 0; fm < filteredMonths.length; fm++) {
+          pTrend.push(cleanNum(rawData[pMetrics[metric]][filteredMonths[fm].col]));
+        }
+        break;
+      }
+    }
+
+    var pChange = pPrevTraffic > 0 ? (((pTraffic - pPrevTraffic) / pPrevTraffic) * 100).toFixed(1) : "N/A";
+    trafficData.push({ name: pName, traffic: pTraffic, change: pChange, trend: pTrend });
+    grandTotal += pTraffic;
+  }
+
+  trafficData.sort(function(a, b) { return b.traffic - a.traffic; });
+
+  for (var i = 0; i < trafficData.length; i++) {
+    var td = trafficData[i];
+    var bg = (PLATFORM_COLORS[td.name] || { light: "#FFF" }).light;
+    var share = grandTotal > 0 ? ((td.traffic / grandTotal) * 100).toFixed(1) + "%" : "0%";
+    var changeStr = td.change !== "N/A" ? getChangePrefix(parseFloat(td.change)) + td.change + "%" : "-";
+    var changeColor = td.change === "N/A" ? "#666" : getChangeColor(parseFloat(td.change));
+    var status = getStatusText(td.change);
+
+    dash.getRange(row, 1, 1, 2).merge().setValue(td.name).setFontWeight("bold").setBackground(bg).setFontSize(FONT_SIZES.table);
+    dash.getRange(row, 3, 1, 2).merge().setValue(td.traffic).setNumberFormat("#,##0").setHorizontalAlignment("center").setBackground(bg).setFontSize(FONT_SIZES.table);
+    dash.getRange(row, 5).setValue(share).setHorizontalAlignment("center").setBackground(bg).setFontSize(FONT_SIZES.table);
+    dash.getRange(row, 6).setValue(changeStr).setFontColor(changeColor).setFontWeight("bold").setHorizontalAlignment("center").setBackground(bg).setFontSize(FONT_SIZES.table);
+    dash.getRange(row, 7, 1, 2).merge().setValue(status).setHorizontalAlignment("center").setBackground(bg).setFontSize(FONT_SIZES.table);
+
+    // Sparkline — green if growth, red if decline
+    dash.getRange(row, 9, 1, 2).merge().setBackground(bg);
+    if (td.trend.length > 1 && td.trend.some(function(v) { return v > 0; })) {
+      var sparkColor = td.change === "N/A" ? "#999999" : (parseFloat(td.change) >= 0 ? "#1B5E20" : "#B71C1C");
+      try {
+        dash.getRange(row, 9).setFormula('=SPARKLINE({' + td.trend.join(",") + '},{"charttype","line";"color","' + sparkColor + '";"linewidth",2})');
+      } catch (e) {
+        dash.getRange(row, 9).setValue("—").setHorizontalAlignment("center").setFontColor("#ccc");
+      }
+    } else {
+      dash.getRange(row, 9).setValue("—").setHorizontalAlignment("center").setFontColor("#ccc");
+    }
+    row++;
+  }
+
+  // Total row
+  var latestTraffic = parsed.totalTrafficRow > -1 ? cleanNum(rawData[parsed.totalTrafficRow][lastMonthCol]) : grandTotal;
+  var prevTraffic = (parsed.totalTrafficRow > -1 && prevMonthCol > -1) ? cleanNum(rawData[parsed.totalTrafficRow][prevMonthCol]) : 0;
+  var tGrowth = prevTraffic > 0 ? (((latestTraffic - prevTraffic) / prevTraffic) * 100).toFixed(1) : "0";
+
+  dash.getRange(row, 1, 1, 2).merge().setValue("TOTAL").setFontWeight("bold").setBackground("#E8F5E9").setFontSize(FONT_SIZES.table);
+  dash.getRange(row, 3, 1, 2).merge().setValue(grandTotal).setNumberFormat("#,##0").setFontWeight("bold").setHorizontalAlignment("center").setBackground("#E8F5E9").setFontSize(FONT_SIZES.table);
+  dash.getRange(row, 5).setValue("100%").setFontWeight("bold").setHorizontalAlignment("center").setBackground("#E8F5E9").setFontSize(FONT_SIZES.table);
+  dash.getRange(row, 6).setValue(tGrowth + "%").setFontWeight("bold").setHorizontalAlignment("center")
+    .setFontColor(parseFloat(tGrowth) >= 0 ? STATUS_COLORS.positive.font : STATUS_COLORS.negative.font).setBackground("#E8F5E9").setFontSize(FONT_SIZES.table);
+  dash.getRange(row, 7, 1, 4).merge().setBackground("#E8F5E9");
+
+  row += 2;
+  return row;
+}
+
+function renderCharts(dash, rawData, parsed, platforms, filteredMonths, lastMonthCol, prevMonthCol, startRow) {
+  var chartStartCol = 12; // Column L onwards
+  var latestLabel = filteredMonths[filteredMonths.length - 1].label;
+
+  // ===== CHART SECTION TITLE =====
+  dash.getRange(1, chartStartCol, 1, 6).merge()
+    .setValue("📊 CHARTS & ANALYTICS")
+    .setFontSize(18).setFontWeight("bold")
+    .setBackground(PRIMARY_BLUE).setFontColor("white")
+    .setHorizontalAlignment("center");
+
+  dash.getRange(2, chartStartCol, 1, 6).merge()
+    .setValue("Auto-generated from dashboard data — " + latestLabel)
+    .setFontSize(10).setFontColor("#666")
+    .setHorizontalAlignment("center").setBackground(STATUS_COLORS.info.bg);
+
+  // ===== CHART LEGEND / GUIDE =====
+  dash.getRange(4, chartStartCol, 1, 3).merge()
+    .setValue("📊 Column Chart")
+    .setFontSize(9).setFontWeight("bold").setFontColor(PRIMARY_BLUE)
+    .setBackground("#f1f3f4").setHorizontalAlignment("center");
+  dash.getRange(4, chartStartCol + 3, 1, 3).merge()
+    .setValue("📈 Bar Chart")
+    .setFontSize(9).setFontWeight("bold").setFontColor("#FF6D00")
+    .setBackground("#f1f3f4").setHorizontalAlignment("center");
+
+  dash.getRange(5, chartStartCol, 1, 3).merge()
+    .setValue("\"How much traffic?\"")
+    .setFontSize(8).setFontStyle("italic").setFontColor("#333")
+    .setBackground("#FFFFFF").setHorizontalAlignment("center");
+  dash.getRange(5, chartStartCol + 3, 1, 3).merge()
+    .setValue("\"Where is the momentum?\"")
+    .setFontSize(8).setFontStyle("italic").setFontColor("#333")
+    .setBackground("#FFFFFF").setHorizontalAlignment("center");
+
+  dash.getRange(6, chartStartCol, 1, 3).merge()
+    .setValue("⬜ Grey = Previous  |  🔵 Blue = Current")
+    .setFontSize(7).setFontColor("#666")
+    .setBackground("#FFFFFF").setHorizontalAlignment("center");
+  dash.getRange(6, chartStartCol + 3, 1, 3).merge()
+    .setValue("🟢 Green = Growing  |  🔴 Red = Declining")
+    .setFontSize(7).setFontColor("#666")
+    .setBackground("#FFFFFF").setHorizontalAlignment("center");
+
+  dash.getRange(7, chartStartCol, 1, 3).merge()
+    .setValue("Answers: Who drives traffic?")
+    .setFontSize(7).setFontWeight("bold").setFontColor("#555")
+    .setBackground("#e8f0fe").setHorizontalAlignment("center");
+  dash.getRange(7, chartStartCol + 3, 1, 3).merge()
+    .setValue("Answers: Who's improving?")
+    .setFontSize(7).setFontWeight("bold").setFontColor("#555")
+    .setBackground("#FFF3E0").setHorizontalAlignment("center");
+
+  // ===== COLLECT DATA =====
+
+  // ===== COLLECT DATA =====
+  var chartData = [];
+
+  for (var p = 0; p < platforms.length; p++) {
+    var pName = platforms[p];
+    var pMetrics = parsed.allData[pName];
+    var pTraffic = 0, pPrevTraffic = 0;
+
+    for (var metric in pMetrics) {
+      if (metric.toLowerCase().indexOf("traffic") > -1) {
+        pTraffic = cleanNum(rawData[pMetrics[metric]][lastMonthCol]);
+        pPrevTraffic = prevMonthCol > -1 ? cleanNum(rawData[pMetrics[metric]][prevMonthCol]) : 0;
+        break;
+      }
+    }
+
+    var pChange = pPrevTraffic > 0 ? (((pTraffic - pPrevTraffic) / pPrevTraffic) * 100).toFixed(1) : "N/A";
+    chartData.push({ name: pName, current: pTraffic, previous: pPrevTraffic, change: pChange });
+  }
+
+  chartData.sort(function(a, b) { return b.current - a.current; });
+
+  // ===== MAKE COLUMNS L-Q VISIBLE =====
+  var totalCols = dash.getMaxColumns();
+  if (totalCols < 17) {
+    dash.insertColumnsAfter(totalCols, 17 - totalCols);
+  }
+
+  // Unhide if hidden
+  try {
+    dash.showColumns(chartStartCol, 6);
+  } catch (e) {}
+
+  for (var c = chartStartCol; c <= chartStartCol + 5; c++) {
+    dash.setColumnWidth(c, 100);
+  }
+
+  // Column K = gap
+  dash.setColumnWidth(11, 20);
+
+  // ===== CHART 1 DATA TABLE: Previous vs Current =====
+  var row = 9;
+
+  dash.getRange(row, chartStartCol, 1, 6).merge()
+    .setValue("📊 TRAFFIC — Previous vs " + latestLabel)
+    .setFontSize(FONT_SIZES.table).setFontWeight("bold")
+    .setBackground(PRIMARY_BLUE).setFontColor("white").setHorizontalAlignment("center");
+  row++;
+
+  // Headers
+  dash.getRange(row, chartStartCol, 1, 2).merge().setValue("Platform")
+    .setFontWeight("bold").setBackground(HEADER_BG).setFontColor("white")
+    .setHorizontalAlignment("center").setFontSize(9);
+  dash.getRange(row, chartStartCol + 2).setValue("Previous")
+    .setFontWeight("bold").setBackground("#9E9E9E").setFontColor("white")
+    .setHorizontalAlignment("center").setFontSize(9);
+  dash.getRange(row, chartStartCol + 3).setValue(latestLabel)
+    .setFontWeight("bold").setBackground(PRIMARY_BLUE).setFontColor("white")
+    .setHorizontalAlignment("center").setFontSize(9);
+  dash.getRange(row, chartStartCol + 4, 1, 2).merge().setValue("")
+    .setBackground(HEADER_BG);
+  row++;
+
+  var chart1DataStart = row;
+
+  for (var i = 0; i < chartData.length; i++) {
+    var cd = chartData[i];
+    var bg = (PLATFORM_COLORS[cd.name] || { light: "#FFF" }).light;
+
+    dash.getRange(row, chartStartCol, 1, 2).merge().setValue(cd.name)
+      .setFontWeight("bold").setBackground(bg).setFontSize(9);
+    dash.getRange(row, chartStartCol + 2).setValue(cd.previous)
+      .setNumberFormat("#,##0").setHorizontalAlignment("center")
+      .setBackground(bg).setFontSize(9);
+    dash.getRange(row, chartStartCol + 3).setValue(cd.current)
+      .setNumberFormat("#,##0").setHorizontalAlignment("center")
+      .setBackground(bg).setFontSize(9);
+    dash.getRange(row, chartStartCol + 4, 1, 2).merge().setBackground(bg);
+    row++;
+  }
+
+  var chart1DataEnd = row - 1;
+
+  // Insight line
+  var topP = chartData[0];
+  var insight1 = topP.current > topP.previous
+    ? "💡 " + topP.name + " leads — up from " + formatNumber(topP.previous)
+    : "💡 " + topP.name + " leads — down from " + formatNumber(topP.previous);
+
+  dash.getRange(row, chartStartCol, 1, 6).merge()
+    .setValue(insight1).setFontSize(8).setFontStyle("italic")
+    .setFontColor("#555").setBackground("#f1f3f4").setHorizontalAlignment("center");
+  row++;
+
+  // Insert Chart 1
+  row++;
+  try {
+    var chart1 = dash.newChart()
+      .setChartType(Charts.ChartType.COLUMN)
+      .addRange(dash.getRange(chart1DataStart - 1, chartStartCol, chartData.length + 1, 4))
+      .setPosition(row, chartStartCol, 0, 0)
+      .setOption('title', 'Previous vs ' + latestLabel)
+      .setOption('titleTextStyle', { fontSize: 10, bold: true, color: '#333' })
+      .setOption('legend', { position: 'bottom', textStyle: { fontSize: 8 } })
+      .setOption('hAxis', { textStyle: { fontSize: 8 }, slantedText: true })
+      .setOption('vAxis', { textStyle: { fontSize: 8 }, gridlines: { count: 5 } })
+      .setOption('colors', ['#9E9E9E', PRIMARY_BLUE])
+      .setOption('bar', { groupWidth: '70%' })
+      .setOption('width', 580)
+      .setOption('height', 250);
+
+    dash.insertChart(chart1.build());
+  } catch (e) {}
+
+  row += 14;
+
+  // ===== CHART 2 DATA TABLE: Growth vs Decline % =====
+  row++;
+
+  dash.getRange(row, chartStartCol, 1, 6).merge()
+    .setValue("📈 GROWTH vs DECLINE %")
+    .setFontSize(FONT_SIZES.table).setFontWeight("bold")
+    .setBackground("#FF6D00").setFontColor("white").setHorizontalAlignment("center");
+  row++;
+
+  // Headers
+  dash.getRange(row, chartStartCol, 1, 2).merge().setValue("Platform")
+    .setFontWeight("bold").setBackground(HEADER_BG).setFontColor("white")
+    .setHorizontalAlignment("center").setFontSize(9);
+  dash.getRange(row, chartStartCol + 2, 1, 2).merge().setValue("Change %")
+    .setFontWeight("bold").setBackground(HEADER_BG).setFontColor("white")
+    .setHorizontalAlignment("center").setFontSize(9);
+  dash.getRange(row, chartStartCol + 4, 1, 2).merge().setValue("Bar")
+    .setFontWeight("bold").setBackground(HEADER_BG).setFontColor("white")
+    .setHorizontalAlignment("center").setFontSize(9);
+  row++;
+
+  var chart2DataStart = row;
+
+  var changeData = chartData.filter(function(d) { return d.change !== "N/A"; })
+    .sort(function(a, b) { return parseFloat(b.change) - parseFloat(a.change); });
+
+  for (var i = 0; i < changeData.length; i++) {
+    var cd = changeData[i];
+    var changeVal = parseFloat(cd.change);
+    var isPositive = changeVal >= 0;
+    var barColor = isPositive ? STATUS_COLORS.positive.font : STATUS_COLORS.negative.font;
+    var bgColor = isPositive ? STATUS_COLORS.positive.bg : STATUS_COLORS.negative.bg;
+    var prefix = isPositive ? "+" : "";
+
+    dash.getRange(row, chartStartCol, 1, 2).merge().setValue(cd.name)
+      .setFontWeight("bold").setBackground(bgColor).setFontSize(9);
+    dash.getRange(row, chartStartCol + 2, 1, 2).merge().setValue(prefix + cd.change + "%")
+      .setFontWeight("bold").setFontColor(barColor)
+      .setHorizontalAlignment("center").setBackground(bgColor).setFontSize(9);
+
+    // Sparkline bar
+    dash.getRange(row, chartStartCol + 4, 1, 2).merge().setBackground(bgColor);
+    try {
+      var absChange = Math.min(Math.abs(changeVal), 100);
+      var sparkColor = isPositive ? "#4CAF50" : "#F44336";
+      var sparkBg = isPositive ? "#E8F5E9" : "#FFEBEE";
+      dash.getRange(row, chartStartCol + 4).setFormula(
+        '=SPARKLINE({' + absChange + ',' + (100 - absChange) + '},{"charttype","bar";"color1","' + sparkColor + '";"color2","' + sparkBg + '"})'
+      );
+    } catch (e) {
+      dash.getRange(row, chartStartCol + 4).setValue("—");
+    }
+    row++;
+  }
+
+  // N/A platforms
+  var naData = chartData.filter(function(d) { return d.change === "N/A"; });
+  for (var i = 0; i < naData.length; i++) {
+    dash.getRange(row, chartStartCol, 1, 2).merge().setValue(naData[i].name)
+      .setFontWeight("bold").setBackground("#f1f3f4").setFontSize(9);
+    dash.getRange(row, chartStartCol + 2, 1, 2).merge().setValue("N/A")
+      .setHorizontalAlignment("center").setBackground("#f1f3f4")
+      .setFontColor("#999").setFontSize(9);
+    dash.getRange(row, chartStartCol + 4, 1, 2).merge().setBackground("#f1f3f4")
+      .setValue("—").setFontColor("#999").setHorizontalAlignment("center").setFontSize(9);
+    row++;
+  }
+
+  var chart2DataEnd = row - 1;
+
+  // Insights
+  var growing = changeData.filter(function(d) { return parseFloat(d.change) > 0; });
+  var declining = changeData.filter(function(d) { return parseFloat(d.change) < 0; });
+
+  if (growing.length > 0) {
+    dash.getRange(row, chartStartCol, 1, 6).merge()
+      .setValue("🏆 Best: " + growing[0].name + " (+" + growing[0].change + "%)")
+      .setFontSize(8).setFontWeight("bold").setFontColor(STATUS_COLORS.positive.font)
+      .setBackground(STATUS_COLORS.positive.bg).setHorizontalAlignment("center");
+    row++;
+  }
+
+  if (declining.length > 0) {
+    var worst = declining[declining.length - 1];
+    dash.getRange(row, chartStartCol, 1, 6).merge()
+      .setValue("📉 Worst: " + worst.name + " (" + worst.change + "%)")
+      .setFontSize(8).setFontWeight("bold").setFontColor(STATUS_COLORS.negative.font)
+      .setBackground(STATUS_COLORS.negative.bg).setHorizontalAlignment("center");
+    row++;
+  }
+
+  var insightText2 = "";
+  if (growing.length > 0 && declining.length > 0) {
+    insightText2 = "💡 " + growing.length + " growing, " + declining.length + " declining — " +
+      (growing.length > declining.length ? "positive momentum" : "needs review");
+  } else if (growing.length > 0) {
+    insightText2 = "💡 All platforms growing — strong momentum!";
+  } else if (declining.length > 0) {
+    insightText2 = "💡 All declining — urgent review needed";
+  }
+
+  if (insightText2) {
+    dash.getRange(row, chartStartCol, 1, 6).merge()
+      .setValue(insightText2).setFontSize(8).setFontStyle("italic")
+      .setFontColor("#555").setBackground("#f1f3f4").setHorizontalAlignment("center");
+    row++;
+  }
+
+  // Insert Chart 2
+  row++;
+  try {
+    var chart2 = dash.newChart()
+      .setChartType(Charts.ChartType.BAR)
+      .addRange(dash.getRange(chart2DataStart - 1, chartStartCol, changeData.length + naData.length + 1, 4))
+      .setPosition(row, chartStartCol, 0, 0)
+      .setOption('title', 'Traffic Change %')
+      .setOption('titleTextStyle', { fontSize: 10, bold: true, color: '#333' })
+      .setOption('legend', { position: 'none' })
+      .setOption('hAxis', { textStyle: { fontSize: 8 }, gridlines: { count: 7 }, baseline: 0, baselineColor: '#333' })
+      .setOption('vAxis', { textStyle: { fontSize: 8 } })
+      .setOption('colors', [PRIMARY_BLUE])
+      .setOption('bar', { groupWidth: '65%' })
+      .setOption('width', 580)
+      .setOption('height', 250);
+
+    dash.insertChart(chart2.build());
+  } catch (e) {}
+
+  // Don't return row — charts are on the side, don't affect main dashboard row
+  return startRow;
+}
+
+function renderMonthlySummary(dash, rawData, parsed, platforms, filteredMonths, monthHeaders, lastMonthCol, prevMonthCol, startRow) {
+  var numCols = 10;
+  var row = startRow;
+
+  var latestLabel = filteredMonths[filteredMonths.length - 1].label;
+  var latestTraffic = parsed.totalTrafficRow > -1 ? cleanNum(rawData[parsed.totalTrafficRow][lastMonthCol]) : 0;
+  var prevTraffic = (parsed.totalTrafficRow > -1 && prevMonthCol > -1) ? cleanNum(rawData[parsed.totalTrafficRow][prevMonthCol]) : 0;
+  var tGrowth = prevTraffic > 0 ? (((latestTraffic - prevTraffic) / prevTraffic) * 100).toFixed(1) : "0";
+
+  // ===== SECTION HEADER =====
+  dash.getRange(row, 1, 1, numCols).merge()
+    .setValue("📊 MONTHLY SUMMARY — " + latestLabel)
+    .setFontSize(13).setFontWeight("bold")
+    .setBackground(PRIMARY_BLUE).setFontColor("white").setHorizontalAlignment("center");
+  row++;
+
+  // Summary text
+  var summaryText = "";
+  if (parseFloat(tGrowth) > 0) {
+    summaryText = "🚀 Great news: Traffic increased by " + tGrowth + "% this month!";
+  } else if (parseFloat(tGrowth) < 0) {
+    summaryText = "📉 Traffic saw a " + tGrowth + "% change this month.";
+  } else {
+    summaryText = "Traffic remained stable this month.";
+  }
+
+  dash.getRange(row, 1, 1, numCols).merge()
+    .setValue(summaryText)
+    .setFontSize(FONT_SIZES.normal).setFontStyle("italic")
+    .setHorizontalAlignment("center").setBackground(STATUS_COLORS.info.bg).setFontColor("#333333");
+  row += 2;
+
+  // ===== DETAILED METRICS PER PLATFORM (with Change %) =====
+  dash.getRange(row, 1, 1, numCols).merge()
+    .setValue("📋 DETAILED METRICS — " + latestLabel)
+    .setFontSize(FONT_SIZES.normal).setFontWeight("bold")
+    .setBackground(PRIMARY_BLUE).setFontColor("white").setHorizontalAlignment("center");
+  row++;
+
+  for (var p = 0; p < platforms.length; p++) {
+    var pName = platforms[p];
+    var pMetrics = parsed.allData[pName];
+    var pColor = (PLATFORM_COLORS[pName] || { dark: "#333" }).dark;
+    var pBg = (PLATFORM_COLORS[pName] || { light: "#FFF" }).light;
+
+    // Platform sub-header — full width
+    dash.getRange(row, 1, 1, numCols).merge()
+      .setValue(pName)
+      .setFontWeight("bold").setFontSize(FONT_SIZES.table)
+      .setBackground(pColor).setFontColor("white").setHorizontalAlignment("center");
+    row++;
+
+    // Column headers: Metric | Current | Previous | Change | Change %
+    dash.getRange(row, 1, 1, 3).merge().setValue("Metric")
+      .setFontWeight("bold").setBackground("#f1f3f4").setFontSize(FONT_SIZES.table).setHorizontalAlignment("center");
+    dash.getRange(row, 4, 1, 2).merge().setValue(latestLabel)
+      .setFontWeight("bold").setBackground("#f1f3f4").setHorizontalAlignment("center").setFontSize(FONT_SIZES.table);
+    dash.getRange(row, 6, 1, 2).merge().setValue("Previous")
+      .setFontWeight("bold").setBackground("#f1f3f4").setHorizontalAlignment("center").setFontSize(FONT_SIZES.table);
+    dash.getRange(row, 8).setValue("Change")
+      .setFontWeight("bold").setBackground("#f1f3f4").setHorizontalAlignment("center").setFontSize(FONT_SIZES.table);
+    dash.getRange(row, 9, 1, 2).merge().setValue("Change %")
+      .setFontWeight("bold").setBackground("#f1f3f4").setHorizontalAlignment("center").setFontSize(FONT_SIZES.table);
+    row++;
+
+    for (var metric in pMetrics) {
+      var mRow = pMetrics[metric];
+      var currentVal = cleanNum(rawData[mRow][lastMonthCol]);
+      var prevVal = prevMonthCol > -1 ? cleanNum(rawData[mRow][prevMonthCol]) : 0;
+      var diff = currentVal - prevVal;
+
+      // Change string
+      var diffStr;
+      if (prevVal > 0) {
+        diffStr = diff >= 0 ? "+" + formatNumber(diff) : "-" + formatNumber(Math.abs(diff));
+      } else {
+        diffStr = "-";
+      }
+
+      // Change % string
+      var changePct;
+      if (prevVal > 0) {
+        var pctVal = ((diff / prevVal) * 100).toFixed(1);
+        changePct = parseFloat(pctVal) >= 0 ? "+" + pctVal + "%" : pctVal + "%";
+      } else {
+        changePct = "-";
+      }
+
+      var diffColor = prevVal > 0 ? getChangeColor(diff) : "#666";
+
+      dash.getRange(row, 1, 1, 3).merge()
+        .setValue(metric)
+        .setFontWeight("bold").setBackground(pBg).setFontSize(FONT_SIZES.table);
+
+      dash.getRange(row, 4, 1, 2).merge()
+        .setValue(currentVal)
+        .setNumberFormat("#,##0").setHorizontalAlignment("center")
+        .setBackground(pBg).setFontSize(FONT_SIZES.table);
+
+      dash.getRange(row, 6, 1, 2).merge()
+        .setValue(prevVal > 0 ? prevVal : "-")
+        .setNumberFormat("#,##0").setHorizontalAlignment("center")
+        .setBackground(pBg).setFontSize(FONT_SIZES.table);
+
+      dash.getRange(row, 8)
+        .setValue(diffStr)
+        .setFontColor(diffColor).setFontWeight("bold")
+        .setHorizontalAlignment("center").setBackground(pBg).setFontSize(FONT_SIZES.table);
+
+      dash.getRange(row, 9, 1, 2).merge()
+        .setValue(changePct)
+        .setFontColor(diffColor).setFontWeight("bold")
+        .setHorizontalAlignment("center").setBackground(pBg).setFontSize(FONT_SIZES.table);
+
+      row++;
+    }
+
+    // Spacer — full width
+    dash.getRange(row, 1, 1, numCols).merge().setBackground("#FFFFFF");
+    row++;
+  }
+
+  row++;
+  return row;
+}
+
+function renderInsightsSection(dash, rawData, parsed, platforms, filteredMonths, monthHeaders, lastMonthCol, prevMonthCol, startRow) {
+  var numCols = 10;
+  var row = startRow;
+
+  dash.getRange(row, 1, 1, numCols).merge()
+    .setValue("🎯 KEY OBSERVATIONS")
+    .setFontSize(13).setFontWeight("bold")
+    .setBackground("#FF6D00").setFontColor("white").setHorizontalAlignment("center");
+  row++;
+
+  var latestTraffic = parsed.totalTrafficRow > -1 ? cleanNum(rawData[parsed.totalTrafficRow][lastMonthCol]) : 0;
+  var prevTraffic = (parsed.totalTrafficRow > -1 && prevMonthCol > -1) ? cleanNum(rawData[parsed.totalTrafficRow][prevMonthCol]) : 0;
+
+  var latestFollowers = 0;
+  for (var p = 0; p < platforms.length; p++) {
+    var pMetrics = parsed.allData[platforms[p]];
+    for (var metric in pMetrics) {
+      var ml = metric.toLowerCase();
+      if (ml.indexOf("followers") > -1 || ml.indexOf("subscribers") > -1) {
+        latestFollowers += cleanNum(rawData[pMetrics[metric]][lastMonthCol]);
+      }
+    }
+  }
+
+  var platformReportForInsights = getAllPlatformReports(rawData, parsed, platforms, lastMonthCol, prevMonthCol);
+
+  var insights = generateInsights(platformReportForInsights, latestTraffic, prevTraffic, latestFollowers,
+    filteredMonths[filteredMonths.length - 1].label, rawData, monthHeaders, parsed.allData, lastMonthCol);
+
+  for (var i = 0; i < insights.length; i++) {
+    var parts = insights[i].split(" ");
+    var icon = parts[0];
+    var text = parts.slice(1).join(" ");
+
+    var bgColor = (icon === "🏆" || icon === "🚀" || icon === "📈" || icon === "✅" || icon === "🎉")
+      ? STATUS_COLORS.positive.bg
+      : (icon === "📉" || icon === "⚠️" || icon === "🔴" || icon === "🔍")
+        ? STATUS_COLORS.negative.bg
+        : STATUS_COLORS.neutral.bg;
+
+    dash.getRange(row, 1).setValue(icon).setFontSize(14).setHorizontalAlignment("center").setBackground(bgColor);
+    dash.getRange(row, 2, 1, 9).merge()
+      .setValue(text).setBackground(bgColor).setWrap(true).setFontSize(FONT_SIZES.table);
+    row++;
+  }
+
+  row++;
+  return row;
+}
+
+
+// ============================================
+// ========= UTILITY FUNCTIONS ================
+// ============================================
+
+function parseCalendarMonth(str) {
+  if (!str || str.indexOf("-") === -1) return null;
+  var parts = str.split("-");
+  var year = parseInt(parts[0]);
+  var monthNum = parseInt(parts[1]);
+  var monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  if (isNaN(year) || isNaN(monthNum) || monthNum < 1 || monthNum > 12) return null;
+  return { month: monthNames[monthNum - 1], year: year };
+}
+
+function findMonthColumn(monthHeaders, month, year) {
+  for (var i = 0; i < monthHeaders.length; i++) {
+    if (monthHeaders[i].month === month && monthHeaders[i].year === year) {
+      return monthHeaders[i].col;
+    }
+  }
+  return -1;
+}
+
+function parseHeaderUniversal(header) {
+  if (!header) return null;
+  if (header instanceof Date) {
+    var monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+    return { month: monthNames[header.getMonth()], year: header.getFullYear(), label: monthNames[header.getMonth()] + " " + header.getFullYear() };
+  }
+  return parseHeader(header.toString());
+}
+
+function parseHeader(header) {
+  if (!header) return null;
+  header = header.toString().replace(/\s+/g, "");
+  var monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  var month = header.substring(0, 3);
+  month = month.charAt(0).toUpperCase() + month.slice(1).toLowerCase();
+  if (monthNames.indexOf(month) === -1) return null;
+  var yearStr = header.replace(/[^0-9]/g, "");
+  var year = yearStr.length === 2 ? 2000 + parseInt(yearStr) : parseInt(yearStr);
+  if (isNaN(year)) return null;
+  return { month: month, year: year, label: month + " " + year };
+}
+
+function getAllMonthHeaders(rawData) {
+  var headers = [];
+  for (var col = 1; col < rawData[0].length; col++) {
+    var parsed = parseHeaderUniversal(rawData[0][col]);
+    if (parsed) headers.push({ col: col, month: parsed.month, year: parsed.year, label: parsed.label });
+  }
+  return headers;
+}
+
+function cleanNum(value) {
+  if (value === "" || value === "-" || value === null || value === undefined) return 0;
+  if (typeof value === "number") return value;
+  var cleaned = value.toString().replace(/,/g, "").trim();
+  if (cleaned === "" || cleaned === "-") return 0;
+  var num = parseFloat(cleaned);
+  return isNaN(num) ? 0 : num;
+}
+
+function formatNumber(num) {
+  if (typeof num !== "number") num = parseFloat(num) || 0;
+  return num.toLocaleString();
+}
+
+function getYearList() {
+  var currentYear = new Date().getFullYear();
+  var years = ["All"];
+  for (var y = 2023; y <= currentYear; y++) {
+    years.push(y.toString());
+  }
+  return years;
+}
+
+function clearDashboardContent(dash) {
+  var lastRow = Math.max(dash.getLastRow(), 6);
+  var lastCol = Math.max(dash.getLastColumn(), 17);
+  if (lastRow > 5) {
+    dash.getRange(6, 1, lastRow - 4, lastCol).clear();
+  }
+
+  // Remove old charts
+  var existingCharts = dash.getCharts();
+  for (var i = 0; i < existingCharts.length; i++) {
+    dash.removeChart(existingCharts[i]);
+  }
+}
+
+function applyDashboardColumnWidths(dash) {
+  // Dashboard columns A-J
+  for (var c = 1; c <= 10; c++) {
+    dash.setColumnWidth(c, 130);
+  }
+
+  // Gap column K
+  dash.setColumnWidth(11, 20);
+
+  // Chart columns L-Q
+  for (var c = 12; c <= 17; c++) {
+    dash.setColumnWidth(c, 100);
+  }
+
+  // Hide everything after Q
+  var totalCols = dash.getMaxColumns();
+  if (totalCols > 17) {
+    try {
+      dash.showColumns(18, totalCols - 17);
+      dash.hideColumns(18, totalCols - 17);
+    } catch (e) {
+      for (var c = 18; c <= totalCols; c++) {
+        dash.setColumnWidth(c, 2);
+      }
+    }
+  }
+}
+
+function ensureScrollableColumns() {
+  try {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var sheet = ss.getSheetByName("Raw Data");
+    if (!sheet) { SpreadsheetApp.getUi().alert("❌ 'Raw Data' not found!"); return; }
+    var totalCols = sheet.getMaxColumns();
+    sheet.insertColumnsAfter(totalCols, 20);
+    SpreadsheetApp.getUi().alert("✅ Added 20 columns!\nTotal: " + sheet.getMaxColumns() + "\nScroll freely!");
+  } catch (e) {
+    SpreadsheetApp.getUi().alert("❌ Error: " + e.message);
+  }
+}
+
+function convertHeadersToDates() {
+  try {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var sheet = ss.getSheetByName("Raw Data");
+    if (!sheet) { SpreadsheetApp.getUi().alert("❌ 'Raw Data' not found!"); return; }
+    var lastCol = sheet.getLastColumn();
+    if (lastCol < 2) { SpreadsheetApp.getUi().alert("⚠️ No data!"); return; }
+
+    var headers = sheet.getRange(1, 2, 1, lastCol - 1).getValues()[0];
+    var monthMap = { "jan": 0, "feb": 1, "mar": 2, "apr": 3, "may": 4, "jun": 5, "jul": 6, "aug": 7, "sep": 8, "oct": 9, "nov": 10, "dec": 11 };
+    var converted = 0;
+
+    for (var i = 0; i < headers.length; i++) {
+      var header = headers[i] ? headers[i].toString().trim() : "";
+      if (!header || header instanceof Date) continue;
+      var cleaned = header.replace(/\s+/g, "");
+      var monthStr = cleaned.substring(0, 3).toLowerCase();
+      var yearStr = cleaned.replace(/[^0-9]/g, "");
+      if (monthMap[monthStr] !== undefined && yearStr) {
+        var year = yearStr.length === 2 ? 2000 + parseInt(yearStr) : parseInt(yearStr);
+        sheet.getRange(1, i + 2).setValue(new Date(year, monthMap[monthStr], 1));
+        converted++;
+      }
+    }
+
+    sheet.getRange(1, 2, 1, lastCol - 1).setNumberFormat("MMM YYYY");
+    sheet.getRange(1, 1, 1, lastCol).setBackground(HEADER_BG).setFontColor("white").setFontWeight("bold").setHorizontalAlignment("center");
+    sheet.getRange(1, 1).setHorizontalAlignment("left");
+    sheet.setFrozenRows(1);
+    sheet.setFrozenColumns(1);
+
+    SpreadsheetApp.getUi().alert("✅ Converted " + converted + " headers to dates!");
+  } catch (e) {
+    SpreadsheetApp.getUi().alert("❌ Error: " + e.message);
+  }
+}
+
+function formatSections() {
+  try {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var sheet = ss.getSheetByName("Raw Data");
+    if (!sheet) { SpreadsheetApp.getUi().alert("❌ 'Raw Data' not found!"); return; }
+
+    var lastCol = sheet.getLastColumn();
+    var lastRow = sheet.getLastRow();
+    if (lastCol < 2 || lastRow < 2) { SpreadsheetApp.getUi().alert("⚠️ Paste data first!"); return; }
+
+    var labels = sheet.getRange(1, 1, lastRow, 1).getValues();
+    var currentPlatform = "";
+
+    for (var i = 0; i < labels.length; i++) {
+      var label = labels[i][0] ? labels[i][0].toString().trim() : "";
+      var rowNum = i + 1;
+      var rowRange = sheet.getRange(rowNum, 1, 1, lastCol);
+
+      if (label === "Platforms") {
+        rowRange.setBackground(HEADER_BG).setFontColor("white").setFontWeight("bold").setHorizontalAlignment("center");
+        sheet.getRange(rowNum, 1).setHorizontalAlignment("left");
+        continue;
+      }
+      if (label === "Post Count") {
+        rowRange.setBackground("#FFF9C4").setFontWeight("bold");
+        currentPlatform = "";
+        continue;
+      }
+      if (label === "Total number of traffics") {
+        rowRange.setBackground("#C8E6C9").setFontWeight("bold").setFontColor(STATUS_COLORS.positive.font).setFontSize(FONT_SIZES.table);
+        currentPlatform = "";
+        continue;
+      }
+      if (PLATFORM_COLORS[label]) {
+        currentPlatform = label;
+        rowRange.setBackground(PLATFORM_COLORS[label].dark).setFontColor(PLATFORM_COLORS[label].font).setFontWeight("bold").setFontSize(FONT_SIZES.table);
+        rowRange.setBorder(true, null, null, null, null, null, "#666", SpreadsheetApp.BorderStyle.SOLID_MEDIUM);
+        continue;
+      }
+      if (currentPlatform && label) {
+        rowRange.setBackground(PLATFORM_COLORS[currentPlatform].light).setFontColor("#333");
+        sheet.getRange(rowNum, 1).setFontWeight("bold");
+        continue;
+      }
+      if (!label) {
+        rowRange.setBackground("#FFFFFF");
+        sheet.setRowHeight(rowNum, 10);
+      }
+    }
+
+    sheet.setFrozenRows(1);
+    sheet.setFrozenColumns(1);
+    sheet.autoResizeColumn(1);
+
+    for (var col = 2; col <= lastCol; col++) {
+      sheet.setColumnWidth(col, 85);
+    }
+
+    if (lastRow > 1 && lastCol > 1) {
+      sheet.getRange(2, 2, lastRow - 1, lastCol - 1).setHorizontalAlignment("center").setNumberFormat("#,##0");
+    }
+
+    SpreadsheetApp.getUi().alert("✅ Formatted!");
+  } catch (e) {
+    SpreadsheetApp.getUi().alert("❌ Error: " + e.message);
+  }
+}
+
+function addNewMonthWithCalendar() {
+  try {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var sheet = ss.getSheetByName("Raw Data");
+    var ui = SpreadsheetApp.getUi();
+    if (!sheet) { ui.alert("❌ 'Raw Data' not found!"); return; }
+
+    var lastCol = sheet.getLastColumn();
+    var lastRow = sheet.getLastRow();
+    var lastHeader = sheet.getRange(1, lastCol).getValue();
+    var lastDate, lastLabel = "";
+
+    if (lastHeader instanceof Date) {
+      lastDate = lastHeader;
+      lastLabel = Utilities.formatDate(lastDate, "GMT+5:30", "MMM yyyy");
+    } else {
+      var parsedH = parseHeader(lastHeader.toString());
+      if (parsedH) {
+        var mm = { "Jan": 0, "Feb": 1, "Mar": 2, "Apr": 3, "May": 4, "Jun": 5, "Jul": 6, "Aug": 7, "Sep": 8, "Oct": 9, "Nov": 10, "Dec": 11 };
+        lastDate = new Date(parsedH.year, mm[parsedH.month], 1);
+        lastLabel = lastHeader.toString();
+      }
+    }
+
+    var nextDate = lastDate ? new Date(lastDate.getFullYear(), lastDate.getMonth() + 1, 1) : new Date();
+    var nextLabel = Utilities.formatDate(nextDate, "GMT+5:30", "MMM yyyy");
+
+    var response = ui.alert("📅 Add New Month", "Last: " + lastLabel + "\nNext: " + nextLabel + "\n\nAdd?", ui.ButtonSet.YES_NO);
+
+    if (response !== ui.Button.YES) {
+      var custom = ui.prompt("Enter MM/YYYY:", ui.ButtonSet.OK_CANCEL);
+      if (custom.getSelectedButton() !== ui.Button.OK) return;
+      var parts = custom.getResponseText().trim().split("/");
+      if (parts.length !== 2) { ui.alert("❌ Use MM/YYYY"); return; }
+      nextDate = new Date(parseInt(parts[1]), parseInt(parts[0]) - 1, 1);
+      nextLabel = Utilities.formatDate(nextDate, "GMT+5:30", "MMM yyyy");
+    }
+
+    var totalCols = sheet.getMaxColumns();
+    var newCol = lastCol + 1;
+    if (newCol > totalCols) sheet.insertColumnsAfter(totalCols, 24);
+
+    sheet.getRange(1, newCol).setValue(nextDate);
+    sheet.getRange(1, newCol).setNumberFormat("MMM YYYY").setBackground(HEADER_BG).setFontColor("white").setFontWeight("bold").setHorizontalAlignment("center");
+
+    if (lastRow > 1) {
+      sheet.getRange(2, lastCol, lastRow - 1, 1).copyFormatToRange(sheet, newCol, newCol, 2, lastRow);
+      sheet.getRange(2, newCol, lastRow - 1, 1).clearContent().setNumberFormat("#,##0").setHorizontalAlignment("center");
+    }
+
+    sheet.setColumnWidth(newCol, 85);
+
+    if (sheet.getMaxColumns() - newCol < 12) {
+      sheet.insertColumnsAfter(sheet.getMaxColumns(), 20);
+    }
+
+    sheet.setActiveRange(sheet.getRange(2, newCol));
+    ui.alert("✅ " + nextLabel + " added!\nStart typing data.");
+  } catch (e) {
+    SpreadsheetApp.getUi().alert("❌ Error: " + e.message);
+  }
+}
+
+function jumpToData() {
+  try {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var sheet = ss.getSheetByName("Raw Data");
+    var ui = SpreadsheetApp.getUi();
+    if (!sheet) { ui.alert("❌ Not found!"); return; }
+
+    var choice = ui.prompt("🔍 Jump To\n\n1 → Platform section\n2 → Last column\n3 → Platform + Month\n\nEnter 1-3:", ui.ButtonSet.OK_CANCEL);
+    if (choice.getSelectedButton() !== ui.Button.OK) return;
+
+    var c = choice.getResponseText().trim();
+
+    if (c === "2") {
+      sheet.setActiveRange(sheet.getRange(1, sheet.getLastColumn()));
+      return;
+    }
+
+    if (c === "1" || c === "3") {
+      var labels = sheet.getRange(1, 1, sheet.getLastRow(), 1).getValues();
+      var p = ui.prompt("Enter platform:", ui.ButtonSet.OK_CANCEL);
+      if (p.getSelectedButton() !== ui.Button.OK) return;
+      var pName = p.getResponseText().trim();
+
+      for (var i = 0; i < labels.length; i++) {
+        if (labels[i][0] && labels[i][0].toString().trim().toLowerCase() === pName.toLowerCase()) {
+          if (c === "1") { sheet.setActiveRange(sheet.getRange(i + 1, 1)); return; }
+          if (c === "3") { sheet.setActiveRange(sheet.getRange(i + 2, sheet.getLastColumn())); return; }
+        }
+      }
+      ui.alert("❌ Not found: " + pName);
+    }
+  } catch (e) {
+    SpreadsheetApp.getUi().alert("❌ Error: " + e.message);
+  }
+}
+
+function showAllMonthsDirect() {
+  try {
+    var raw = SpreadsheetApp.getActiveSpreadsheet().getSheetByName("Raw Data");
+    if (!raw) { SpreadsheetApp.getUi().alert("❌ 'Raw Data' not found!"); return; }
+    var headers = getAllMonthHeaders(raw.getDataRange().getValues());
+    var list = headers.map(function(m, i) { return (i + 1) + ". " + m.label; }).join("\n");
+    SpreadsheetApp.getUi().alert("📅 All Months (" + headers.length + "):\n\n" + list);
+  } catch (e) {
+    SpreadsheetApp.getUi().alert("❌ Error: " + e.message);
+  }
+}
+
+
+// ============================================
+// ========= QUICK VIEW SHORTCUTS =============
+// ============================================
+
+function viewFacebook() { quickView("Facebook", "All", "All"); }
+function viewLinkedIn() { quickView("LinkedIn", "All", "All"); }
+function viewTwitter() { quickView("Twitter", "All", "All"); }
+function viewYoutube() { quickView("Youtube", "All", "All"); }
+function viewReddit() { quickView("Reddit", "All", "All"); }
+function viewThreads() { quickView("Threads", "All", "All"); }
+function viewQuora() { quickView("Quora", "All", "All"); }
+function viewAll() { quickView("All", "All", "All"); }
+function viewYear2023() { quickView("All", "All", "2023"); }
+function viewYear2024() { quickView("All", "All", "2024"); }
+function viewYear2025() { quickView("All", "All", "2025"); }
+function viewYear2026() { quickView("All", "All", "2026"); }
+
+function quickView(platform, month, year) {
+  try {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var dash = ss.getSheetByName("Dashboard");
+    if (!dash) { buildDashboard(); dash = ss.getSheetByName("Dashboard"); }
+    dash.getRange("B4").setValue(platform);
+    dash.getRange("D4").setValue(month);
+    dash.getRange("F4").setValue(year);
+    ss.setActiveSheet(dash);
+    refreshDashboard();
+  } catch (e) {
+    SpreadsheetApp.getUi().alert("❌ Error: " + e.message);
+  }
+}
